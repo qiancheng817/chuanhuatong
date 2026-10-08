@@ -1,6 +1,6 @@
 {
     "name":  "传话筒",
-    "version":  "2.5.0",
+    "version":  "2.6.0",
     "description":  "小爱音箱与企业微信双向传话（纯插件，无需额外中间件）：孩子对小爱说“告诉爸爸/妈妈 + 内容”，本插件自动向 MIoT 注册对话 webhook，收到后转发企微；在企微智能机器人打字回话，本插件经 WebSocket 长连接收到后调用 MIoT 让小爱播报。",
     "author":  "qiancheng817",
     "homepage":  "https://github.com/qiancheng817/chuanhuatong",
@@ -16,6 +16,6 @@
     "publicPaths":  [
                         "/relay/inbound"
                     ],
-    "entryHash":  "28f09f55e53fcc3765ae3700e0448396bf910d1cc4251b0b5dbbf9f17b63bd50",
-    "zipHash":  "cb29cd2b4df9af492f5c2f2480976156392df642537af2a62cd7ec4c3ccf928d"
+    "entryHash":  "ff79d62f066cca39ca5540a23709f141147339dbd7e075897b17f796bf7f7d29",
+    "zipHash":  "7c3335eabfe76b474187f30eb2363d65e1cad1a20c79f6fd0b61c67ef0a1ddc5"
 }

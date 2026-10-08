@@ -120,11 +120,10 @@
   }
 
   // --------------------------------------------------------------
-  // 入站 webhook 状态 / 注册 / 复制
+  // 入站 webhook 状态 / 注册
   // --------------------------------------------------------------
   function renderInbound(ib) {
     if (!ib) return;
-    if (ib.url) document.getElementById("inbound-url").value = ib.url;
     var el = document.getElementById("register-status");
     if (ib.working) {
       el.innerHTML = '<span class="badge wait">处理中…</span>';
@@ -162,28 +161,6 @@
         ' <span style="color:var(--fail)">' + escapeHtml("" + e) + "</span>";
       toast("注册失败：" + e, 3500);
     }
-  }
-
-  async function copyInboundUrl() {
-    var input = document.getElementById("inbound-url");
-    var url = input.value;
-    if (!url) { toast("地址还未生成，请稍候再试"); return; }
-    var done = false;
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(url);
-        done = true;
-      }
-    } catch (e) {}
-    if (!done) {
-      try {
-        input.focus();
-        input.select();
-        input.setSelectionRange(0, url.length);
-        done = document.execCommand("copy");
-      } catch (e) {}
-    }
-    toast(done ? "地址已复制" : "复制失败，请手动复制", done ? 2200 : 4000);
   }
 
   // --------------------------------------------------------------
@@ -245,7 +222,6 @@
     runTest("tts", "小爱播报");
   });
   document.getElementById("register-now").addEventListener("click", doRegister);
-  document.getElementById("copy-url").addEventListener("click", copyInboundUrl);
 
   loadConfig();
   refreshStatus();

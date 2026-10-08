@@ -20,7 +20,7 @@
   var MESSAGES_KEY = "messages";
   var DEVICE_KEY = "last_device";
   var MAX_MESSAGES = 200;
-  var PLUGIN_VERSION = "2.5.0";
+  var PLUGIN_VERSION = "2.6.0";
 
   var WECOM_WS_URL = "wss://openws.work.weixin.qq.com";
   var CMD_SUBSCRIBE = "aibot_subscribe";
@@ -99,6 +99,7 @@
     detail: "",
     lastCheckedText: ""
   };
+  var deviceLastAttempt = 0;
 
   // ----------------------------------------------------------------
   // 工具
@@ -308,6 +309,44 @@
       return { ok: false, error: r.data.error || "MIoT TTS 调用失败" };
     }
     return { ok: true };
+  }
+
+  // 主动向 MIoT 查询已登录账号下的音箱，自动填好 lastDevice（无需用户手动填 ID 或触发一次语音）
+  async function discoverDevice() {
+    if (config.targetAccountId && config.targetDeviceId) return { ok: true, found: true };
+    var ctx;
+    try {
+      ctx = await getHostContext();
+    } catch (e) {
+      return { ok: false, error: "获取宿主地址/JWT 失败：" + e };
+    }
+    var r = await httpRequest(
+      "GET", miotApiBase(ctx) + "/mina/devices", null,
+      { Authorization: "Bearer " + ctx.jwt }
+    );
+    if (!r.ok) return { ok: false, error: r.error || ("HTTP " + r.status) };
+    if (r.data && r.data.success === false) {
+      return { ok: false, error: r.data.error || "MIoT 返回错误" };
+    }
+    var list = (r.data && Array.isArray(r.data.data)) ? r.data.data : [];
+    for (var i = 0; i < list.length; i++) {
+      var acc = list[i] || {};
+      var devs = Array.isArray(acc.devices) ? acc.devices : [];
+      for (var j = 0; j < devs.length; j++) {
+        var dev = devs[j] || {};
+        var did = dev.deviceID || dev.device_id;
+        if (!did) continue;
+        lastDevice = {
+          account_id: "" + (acc.account_id || ""),
+          device_id: "" + did,
+          device_name: "" + (dev.name || dev.device_name || dev.alias || "")
+        };
+        await saveDevice();
+        songloft.log.info("已自动识别音箱: " + (lastDevice.device_name || lastDevice.device_id));
+        return { ok: true, found: true };
+      }
+    }
+    return { ok: true, found: false };
   }
 
   // ----------------------------------------------------------------
@@ -616,6 +655,11 @@
   // ----------------------------------------------------------------
   async function handleStatus() {
     await ensureInboundUrl();
+    if (!lastDevice.device_id && !(config.targetAccountId && config.targetDeviceId) &&
+        (nowMs() - deviceLastAttempt > 15000)) {
+      deviceLastAttempt = nowMs();
+      discoverDevice();
+    }
     return jsonOk({
       version: PLUGIN_VERSION,
       wecom: {
@@ -646,8 +690,8 @@
       setTimeout(function () { wecom.connect(); }, 500);
     }
 
-    // 保存后自动确保 MIoT webhook 已注册
-    setTimeout(function () { registerInbound(); }, 1200);
+    // 保存后自动确保 MIoT webhook 已注册，并主动识别音箱
+    setTimeout(function () { registerInbound(); discoverDevice(); }, 1200);
 
     return jsonOk({ config: config });
   }
@@ -686,7 +730,7 @@
   // ----------------------------------------------------------------
   function autoRegisterWithRetry() {
     [3000, 8000, 15000, 25000].forEach(function (d) {
-      setTimeout(function () { registerInbound(); }, d);
+      setTimeout(function () { registerInbound(); discoverDevice(); }, d);
     });
   }
 

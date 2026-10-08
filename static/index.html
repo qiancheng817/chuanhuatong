@@ -107,19 +107,13 @@
   <section class="card">
     <h2>入站对接（孩子语音 → 传话筒）</h2>
     <div class="hint" style="margin:0 0 10px">
-      插件会<b>自动</b>把本插件登记为 MIoT 的「对话 Webhook」，你无需手动操作。
+      插件会<b>自动</b>把本插件登记为 MIoT 的「对话 Webhook」，无需手动操作。
     </div>
-
-    <div class="url-row">
-      <input type="text" id="inbound-url" readonly placeholder="打开页面后自动生成">
-      <button type="button" class="btn" id="copy-url">复制地址</button>
-    </div>
-    <div class="hint">上方地址由插件按你的 Songloft 地址自动生成，仅供查看。</div>
-
     <div class="actions" style="margin-top:10px">
       <button type="button" class="btn primary" id="register-now">立即注册 / 检查</button>
       <span id="register-status" style="font-size:13px"></span>
     </div>
+    <div class="hint">点击按钮会实时显示 处理中 / 已注册 / 失败原因。注册成功后，孩子说「告诉爸爸/妈妈 + 内容」即可触发推送。</div>
   </section>
 
   <section class="card">
@@ -219,6 +213,6 @@
   </section>
 </main>
 <div id="toast"></div>
-<script src="static/js/app.js"></script>
+<script src="static/js/app.js?v=2.6.0"></script>
 </body>
 </html>
