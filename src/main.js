@@ -40,11 +40,15 @@
       botSecret: "",
       // 企微群机器人 webhook（孩子→爸爸推送，最简单可靠）；留空则走智能机器人长连接
       groupWebhookUrl: "",
-      // 唤醒词：孩子语音必须以其中一个开头
-      wakeKeywords: ["告诉爸爸", "呼叫爸爸", "通知爸爸"],
+      // 唤醒词：孩子语音必须以其中一个开头（三种称呼，含常见口语变体）
+      wakeKeywords: [
+        "告诉爸爸和妈妈", "告诉爸爸妈妈", "告诉爸妈",
+        "告诉爸爸", "告诉妈妈"
+      ],
       stripKeyword: true,
       senderName: "孩子",
-      replyPrefix: "爸爸说",
+      // 回话播报前缀：留空则直接播报内容
+      replyPrefix: "",
       confirmText: "已转告小爱音箱",
       // MIoT 插件 entryPath
       miotEntry: "miot",
@@ -211,7 +215,10 @@
   // ----------------------------------------------------------------
   function matchWake(text) {
     var t = ("" + (text || "")).trim();
-    var kws = config.wakeKeywords || [];
+    // 按关键词长度降序匹配（最长优先），防止「告诉爸爸和妈妈」被「告诉爸爸」抢先命中
+    var kws = (config.wakeKeywords || []).slice().sort(function (a, b) {
+      return ("" + b).length - ("" + a).length;
+    });
     for (var i = 0; i < kws.length; i++) {
       var kw = ("" + kws[i]).trim();
       if (kw && t.indexOf(kw) === 0) {

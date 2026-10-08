@@ -15,6 +15,6 @@
     "publicPaths":  [
                         "/relay/inbound"
                     ],
-    "entryHash":  "f462b8432334824006d25816aadcd4ba53e04dd831e99f86ad0dcacfd5e8e989",
-    "zipHash":  "388c51239cf9d97d516298efabec97158bdb40771f7b44d479dad9ac6c869a4d"
+    "entryHash":  "476bd4e387bf89924da797092b778bd0d540640924798a1a8cba49f969e02526",
+    "zipHash":  "cc3793cae2ddcceb59cd1c15d0fa943bc8a4bcbc5ce17b338e4bf408b5bb36e6"
 }
