@@ -20,12 +20,11 @@
   var MESSAGES_KEY = "messages";
   var DEVICE_KEY = "last_device";
   var MAX_MESSAGES = 200;
-  var PLUGIN_VERSION = "2.6.0";
+  var PLUGIN_VERSION = "2.7.0";
 
   var WECOM_WS_URL = "wss://openws.work.weixin.qq.com";
   var CMD_SUBSCRIBE = "aibot_subscribe";
   var CMD_MSG = "aibot_msg_callback";
-  var CMD_RESPOND = "aibot_respond_msg";
   var CMD_SEND = "aibot_send_msg";
   var CMD_PING = "ping";
 
@@ -49,7 +48,6 @@
       stripKeyword: true,
       senderName: "孩子",
       replyPrefix: "",            // 播报前缀，留空 = 直接播报
-      confirmText: "已转告小爱音箱",
       miotEntry: "miot",
       targetAccountId: "",
       targetDeviceId: ""
@@ -59,7 +57,7 @@
   var FIELD_TYPES = {
     botId: "string", botSecret: "string", groupWebhookUrl: "string", chatid: "string",
     wakeKeywords: "array", stripKeyword: "bool",
-    senderName: "string", replyPrefix: "string", confirmText: "string",
+    senderName: "string", replyPrefix: "string",
     miotEntry: "string", targetAccountId: "string", targetDeviceId: "string"
   };
 
@@ -553,10 +551,9 @@
       var body = frame.body || {};
       if (body.msgtype === "text") {
         var content = ((body.text && body.text.content) || "").trim();
-        var reqId = frame.headers && frame.headers.req_id;
         // 群聊用 chatid；单聊常无 chatid，回退发送方 userid
         rememberChatid(body.chatid || body.from_userid || "");
-        if (content) this.handleIncomingText(content, reqId);
+        if (content) this.handleIncomingText(content);
       }
     },
 
@@ -575,7 +572,7 @@
       }, 30000);
     },
 
-    handleIncomingText: async function (text, reqId) {
+    handleIncomingText: async function (text) {
       songloft.log.info("企微收到回话: " + text);
       await addMessage({
         dir: "out", text: text, status: "pending", detail: ""
@@ -588,25 +585,6 @@
         status: r.ok ? "broadcast" : "failed",
         detail: r.ok ? "" : (r.error || "播报失败")
       });
-
-      if (reqId) {
-        this.respond(reqId, r.ok ? (config.confirmText || "好的")
-          : ("转告失败：" + (r.error || "未知错误")));
-      }
-    },
-
-    respond: function (reqId, text) {
-      try {
-        this.socket.send(JSON.stringify({
-          cmd: CMD_RESPOND,
-          headers: { req_id: reqId },
-          body: { msgtype: "text", text: { content: text } }
-        }));
-        return true;
-      } catch (e) {
-        songloft.log.error("respond: " + e);
-        return false;
-      }
     },
 
     send: function (chatid, text) {

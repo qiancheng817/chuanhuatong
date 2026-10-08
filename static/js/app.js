@@ -41,7 +41,6 @@
     document.getElementById("cfg-wakeKeywords").value = (c.wakeKeywords || []).join(",");
     document.getElementById("cfg-senderName").value = c.senderName || "";
     document.getElementById("cfg-replyPrefix").value = c.replyPrefix || "";
-    document.getElementById("cfg-confirmText").value = c.confirmText || "";
     document.getElementById("cfg-stripKeyword").checked = c.stripKeyword !== false;
     document.getElementById("cfg-miotEntry").value = c.miotEntry || "miot";
     document.getElementById("cfg-targetAccountId").value = c.targetAccountId || "";
@@ -57,7 +56,6 @@
       wakeKeywords: document.getElementById("cfg-wakeKeywords").value,
       senderName: document.getElementById("cfg-senderName").value.trim() || "孩子",
       replyPrefix: document.getElementById("cfg-replyPrefix").value.trim(),
-      confirmText: document.getElementById("cfg-confirmText").value.trim(),
       stripKeyword: document.getElementById("cfg-stripKeyword").checked,
       miotEntry: document.getElementById("cfg-miotEntry").value.trim() || "miot",
       targetAccountId: document.getElementById("cfg-targetAccountId").value.trim(),
