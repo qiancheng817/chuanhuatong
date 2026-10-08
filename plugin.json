@@ -1,7 +1,7 @@
 {
     "name":  "传话筒",
-    "version":  "2.2.0",
-    "description":  "小爱音箱与企业微信双向传话（纯插件，无需额外中间件）：孩子对小爱说“告诉爸爸/妈妈 + 内容”，经 MIoT 插件对话 webhook 推送至本插件并转发企微；在企微智能机器人打字回话，本插件经 WebSocket 长连接收到后调用 MIoT 让小爱播报。支持 webhook 自动注册 / 手动填写两种模式。",
+    "version":  "2.3.0",
+    "description":  "小爱音箱与企业微信双向传话（纯插件，无需额外中间件）：孩子对小爱说“告诉爸爸/妈妈 + 内容”，经 MIoT 插件对话 webhook 推送至本插件并转发企微；在企微智能机器人打字回话，本插件经 WebSocket 长连接收到后调用 MIoT 让小爱播报。支持 webhook 自动注册 / 手动填写、插件内检测更新。",
     "author":  "qiancheng817",
     "homepage":  "https://github.com/qiancheng817/chuanhuatong",
     "license":  "MIT",
@@ -16,6 +16,7 @@
     "publicPaths":  [
                         "/relay/inbound"
                     ],
-    "entryHash":  "aa1cfb95c245dab99328034e985cc7e917538a8e5df3978b668aeea59ba98786",
-    "zipHash":  "b2f2cbb5089027114dced7d011cc69acefc386379a7902b51af84275f1e8f748"
+    "updateUrl":  "https://cdn.jsdelivr.net/gh/qiancheng817/chuanhuatong@main/updates.json",
+    "entryHash":  "ce76ade20c66c9271a5e7c5d3c1aea9bbe723b9c245727c9e4c03be7dfd9a908",
+    "zipHash":  "81f61bb8bfcf15eff8cb5d67229b18a0e9abd4ec5f5b3c641b0d074ac7ae2781"
 }

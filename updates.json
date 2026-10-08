@@ -1,0 +1,6 @@
+{
+  "version": "2.3.0",
+  "entryPath": "chuanhuatong",
+  "download_url": "https://cdn.jsdelivr.net/gh/qiancheng817/chuanhuatong@main/dist/chuanhuatong.jsplugin.zip",
+  "notes": "支持 webhook 自动注册与手动填写、插件内检测更新、手动设置会话 chatid。"
+}

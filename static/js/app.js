@@ -163,6 +163,54 @@
     } catch (e) {}
   }
 
+  // --------------------------------------------------------------
+  // 版本更新
+  // --------------------------------------------------------------
+  function renderUpdate(u) {
+    if (!u) return;
+    document.getElementById("up-current").textContent = u.currentVersion;
+    document.getElementById("up-latest").textContent = u.latestVersion || "—";
+    var info = document.getElementById("up-info");
+    if (u.checking) {
+      info.innerHTML = '<span class="badge wait">检查中…</span>';
+    } else if (u.detail) {
+      info.innerHTML = badge("off", "检查失败") +
+        ' <span style="color:var(--fail)">' + escapeHtml(u.detail) + "</span>";
+    } else if (u.hasUpdate) {
+      info.innerHTML = badge("info", "发现新版本 v" + u.latestVersion) +
+        (u.notes ? ' <span>' + escapeHtml(u.notes) + "</span>" : "") +
+        (u.downloadUrl
+          ? ' &nbsp;<a class="btn small primary" href="' + encodeURI(u.downloadUrl) +
+            '" target="_blank">下载新版</a>' : "");
+    } else if (u.latestVersion) {
+      info.innerHTML = badge("on", "已是最新版本") +
+        (u.checkedText ? ' <span style="color:var(--muted)">' + u.checkedText + "</span>" : "");
+    } else {
+      info.innerHTML = '<span style="color:var(--muted)">尚未检查，点右上角「检查更新」</span>';
+    }
+  }
+
+  async function refreshUpdateDisplay() {
+    try {
+      var r = await apiGet("/api/status");
+      if (r && r.ok) renderUpdate(r.update);
+    } catch (e) {}
+  }
+
+  async function doCheckUpdate() {
+    var info = document.getElementById("up-info");
+    info.innerHTML = '<span class="badge wait">检查中…</span>';
+    try {
+      var r = await apiPost("/api/update/check", {});
+      if (r && r.ok && r.update) {
+        renderUpdate(r.update);
+        var u = r.update;
+        if (!u.detail && u.hasUpdate) toast("发现新版本 v" + u.latestVersion);
+        else if (!u.detail) toast("已是最新版本");
+      }
+    } catch (e) { toast("检查更新失败：" + e, 3500); }
+  }
+
   async function doRegister() {
     var el = document.getElementById("register-status");
     el.innerHTML = '<span class="badge wait">注册中…</span>';
@@ -251,6 +299,7 @@
   });
   document.getElementById("register-now").addEventListener("click", doRegister);
   document.getElementById("copy-url").addEventListener("click", copyInboundUrl);
+  document.getElementById("check-update").addEventListener("click", doCheckUpdate);
   document.querySelectorAll("#inbound-seg button").forEach(function (b) {
     b.addEventListener("click", function () {
       setInboundMode(b.getAttribute("data-mode"));
@@ -261,7 +310,9 @@
   refreshStatus();
   refreshMessages();
   refreshInbound();
+  refreshUpdateDisplay();
   setInterval(refreshStatus, 10000);
   setInterval(refreshMessages, 8000);
-  setInterval(refreshInbound, 15000);
+  setInterval(refreshInbound, 60000);
+  setInterval(refreshUpdateDisplay, 60000);
 })();

@@ -1,0 +1,6 @@
+{
+  "name": "传话筒插件源",
+  "plugins": [
+    "https://cdn.jsdelivr.net/gh/qiancheng817/chuanhuatong@main/plugin.json"
+  ]
+}

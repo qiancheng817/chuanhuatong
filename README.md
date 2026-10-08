@@ -46,7 +46,28 @@
 
 ---
 
-## 部署步骤
+## 安装方式
+
+### 方式一：从插件商店订阅源安装（推荐）
+
+1. Songloft → 设置 → JS 插件管理 → **插件商店 → 管理订阅源**
+2. 添加本插件源地址：
+
+```
+https://cdn.jsdelivr.net/gh/qiancheng817/chuanhuatong@main/registry.json
+```
+
+3. 返回插件商店即可看到「传话筒」，一键安装并启用。
+
+### 方式二：手动上传
+
+下载 [`dist/chuanhuatong.jsplugin.zip`](https://github.com/qiancheng817/chuanhuatong/raw/main/dist/chuanhuatong.jsplugin.zip)，在「JS 插件管理」页上传安装。
+
+> **更新**：插件页「版本与更新」卡片可随时点「检查更新」，发现新版本会显示下载入口；插件也会在启动时及每 6 小时自动检查一次。
+
+---
+
+## 配置步骤
 
 ### 第一步：创建企业微信智能机器人（用于爸爸回话）
 

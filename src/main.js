@@ -21,7 +21,13 @@
   var MESSAGES_KEY = "messages";
   var DEVICE_KEY = "last_device";
   var CHATID_KEY = "last_chatid";
+  var UPDATE_KEY = "update_state";
   var MAX_MESSAGES = 200;
+
+  var PLUGIN_VERSION = "2.3.0";
+  // 远程更新清单（随仓库发布，内容为最新版本号与下载地址）
+  var UPDATE_MANIFEST_URL =
+    "https://cdn.jsdelivr.net/gh/qiancheng817/chuanhuatong@main/updates.json";
 
   var WECOM_WS_URL = "wss://openws.work.weixin.qq.com";
   var CMD_SUBSCRIBE = "aibot_subscribe";
@@ -250,6 +256,88 @@
   // 生效的会话 chatid：手动配置优先，其次自动捕获
   function getEffectiveChatid() {
     return (config.manualChatid || lastChatid || "").trim();
+  }
+
+  // ----------------------------------------------------------------
+  // 更新检测
+  // ----------------------------------------------------------------
+  var updateState = {
+    currentVersion: PLUGIN_VERSION,
+    latestVersion: "",
+    hasUpdate: false,
+    downloadUrl: "",
+    notes: "",
+    checking: false,
+    checkedText: "",
+    detail: ""
+  };
+
+  // 语义化版本比较：a>b 返回 1，相等 0，a<b -1
+  function compareVersion(a, b) {
+    function parts(v) {
+      return ("" + v).split(".").map(function (n) {
+        n = parseInt(n, 10);
+        return isNaN(n) ? 0 : n;
+      });
+    }
+    var pa = parts(a), pb = parts(b);
+    var len = Math.max(pa.length, pb.length);
+    for (var i = 0; i < len; i++) {
+      var x = pa[i] || 0, y = pb[i] || 0;
+      if (x !== y) return x > y ? 1 : -1;
+    }
+    return 0;
+  }
+
+  async function checkUpdate(force) {
+    if (updateState.checking) return updateState;
+    updateState.checking = true;
+    try {
+      var r = await httpRequest("GET", UPDATE_MANIFEST_URL, null);
+      if (!r.ok || !r.data) {
+        updateState.detail = r.error || ("HTTP " + r.status);
+      } else {
+        var data = r.data;
+        updateState.latestVersion = "" + (data.version || "");
+        updateState.downloadUrl = "" + (data.download_url || data.downloadUrl || "");
+        updateState.notes = "" + (data.notes || "");
+        updateState.hasUpdate = !!updateState.latestVersion &&
+          compareVersion(updateState.latestVersion, PLUGIN_VERSION) > 0;
+        updateState.detail = "";
+      }
+      updateState.checkedText = formatTime(nowMs());
+      await persistUpdateState();
+    } finally {
+      updateState.checking = false;
+    }
+    return updateState;
+  }
+
+  async function loadUpdateState() {
+    try {
+      var s = await songloft.storage.get(UPDATE_KEY);
+      if (s && typeof s === "object") {
+        updateState.latestVersion = s.latestVersion || "";
+        updateState.downloadUrl = s.downloadUrl || "";
+        updateState.notes = s.notes || "";
+        updateState.hasUpdate = !!s.hasUpdate;
+        updateState.checkedText = s.checkedText || "";
+        updateState.detail = s.detail || "";
+      }
+    } catch (e) {}
+  }
+
+  async function persistUpdateState() {
+    try {
+      await songloft.storage.set(UPDATE_KEY, {
+        latestVersion: updateState.latestVersion,
+        downloadUrl: updateState.downloadUrl,
+        notes: updateState.notes,
+        hasUpdate: updateState.hasUpdate,
+        checkedText: updateState.checkedText,
+        detail: updateState.detail
+      });
+    } catch (e) {}
   }
 
   async function pushToWecom(content) {
@@ -705,10 +793,25 @@
         lastChecked: inboundState.lastChecked,
         lastCheckedText: inboundState.lastChecked ? formatTime(inboundState.lastChecked) : ""
       },
+      update: {
+        currentVersion: PLUGIN_VERSION,
+        latestVersion: updateState.latestVersion,
+        hasUpdate: updateState.hasUpdate,
+        downloadUrl: updateState.downloadUrl,
+        notes: updateState.notes,
+        checking: updateState.checking,
+        checkedText: updateState.checkedText,
+        detail: updateState.detail
+      },
       wakeKeywords: config.wakeKeywords,
       messageCount: messages.length,
       serverTimeText: formatTime(nowMs())
     });
+  }
+
+  async function handleUpdateCheck() {
+    var s = await checkUpdate(true);
+    return jsonOk({ update: s });
   }
 
   async function handleSetConfig(req) {
@@ -787,11 +890,16 @@
 
   globalThis.onInit = async function () {
     await loadState();
-    songloft.log.info("chuanhuatong initialized; lastDevice=" +
-      (lastDevice.device_name || "<none>") + ", ws=" + wecom.state +
-      ", inbound=" + config.inboundMode);
+    await loadUpdateState();
+    songloft.log.info("chuanhuatong initialized v" + PLUGIN_VERSION +
+      "; lastDevice=" + (lastDevice.device_name || "<none>") +
+      ", ws=" + wecom.state + ", inbound=" + config.inboundMode);
     if (config.botId && config.botSecret) wecom.connect();
     if (config.inboundMode === "auto") autoRegisterWithRetry();
+
+    // 启动后延迟检查一次更新，之后每 6 小时检查一次
+    setTimeout(function () { checkUpdate(true); }, 8000);
+    setInterval(function () { checkUpdate(true); }, 6 * 60 * 60 * 1000);
   };
 
   globalThis.onDeinit = function () {
@@ -806,9 +914,10 @@
       if (method === "POST" && path === "/relay/inbound") return await handleInbound(req);
 
       if (method === "GET" && (path === "/" || path === "/api/ping")) {
-        return jsonOk({ name: "chuanhuatong", version: "2.0.0", time: formatTime(nowMs()) });
+        return jsonOk({ name: "chuanhuatong", version: PLUGIN_VERSION, time: formatTime(nowMs()) });
       }
       if (method === "GET" && path === "/api/status") return handleStatus();
+      if (method === "POST" && path === "/api/update/check") return await handleUpdateCheck();
       if (method === "GET" && path === "/api/config") return jsonOk({ config: config });
       if (method === "POST" && path === "/api/config") return await handleSetConfig(req);
       if (method === "GET" && path === "/api/messages") {

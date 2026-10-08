@@ -103,6 +103,17 @@
     </div>
   </section>
 
+  <section class="card" id="update-card">
+    <h2>版本与更新
+      <button class="btn small" id="check-update">检查更新</button>
+    </h2>
+    <div class="status-grid">
+      <div class="status-item"><div class="k">当前版本</div><div id="up-current">-</div></div>
+      <div class="status-item"><div class="k">最新版本</div><div id="up-latest">-</div></div>
+      <div class="status-item" style="grid-column: 1 / -1"><div class="k">更新状态</div><div id="up-info">—</div></div>
+    </div>
+  </section>
+
   <section class="card">
     <h2>入站对接（孩子语音 → 传话筒）</h2>
     <div class="hint" style="margin:0 0 10px">
@@ -114,24 +125,29 @@
     </div>
 
     <div class="url-row">
-      <input type="text" id="inbound-url" readonly placeholder="保存配置并连接后自动生成">
+      <input type="text" id="inbound-url" readonly placeholder="打开页面后自动生成">
       <button type="button" class="btn" id="copy-url">复制地址</button>
     </div>
 
+    <!-- 需要填写的地址说明（两种模式共用，常显） -->
+    <div class="step" style="margin-top:10px">
+      需要登记到 MIoT 的 Webhook 地址就是<b>上面这一条</b>（已自动按你的 Songloft 地址生成，直接复制即可）。
+    </div>
+
     <!-- 自动 -->
-    <div class="mode-pane" id="pane-auto">
-      <div class="step">插件将<b>自动调用 MIoT 接口</b>完成注册，无需你去音箱插件里操作。</div>
+    <div class="mode-pane show" id="pane-auto">
+      <div class="step">当前为<b>自动模式</b>：插件自动调用 MIoT 接口完成注册，你无需手动操作。</div>
       <div class="actions" style="margin-top:8px">
-        <button type="button" class="btn primary" id="register-now">立即注册</button>
+        <button type="button" class="btn primary" id="register-now">立即注册 / 检查</button>
         <span id="register-status" style="font-size:13px"></span>
       </div>
     </div>
 
     <!-- 手动 -->
     <div class="mode-pane" id="pane-manual">
-      <div class="step">① 打开 <b>智能音箱插件 → 语音 → Webhook 回调</b></div>
-      <div class="step">② 名称随意（如「传话筒」），URL 粘贴<b>上面复制的地址</b>，点「添加」</div>
-      <div class="hint">手动添加后可点「立即注册」旁的状态检查，或直接看页面状态是否变为已注册。</div>
+      <div class="step">① 点上方「<b>复制地址</b>」拿到 Webhook 地址</div>
+      <div class="step">② 打开 <b>智能音箱插件 → 语音 → Webhook 回调</b></div>
+      <div class="step">③ 名称随意（如「传话筒」），URL 粘贴刚才复制的地址，点「<b>添加</b>」</div>
     </div>
   </section>
 
