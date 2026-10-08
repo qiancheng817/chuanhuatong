@@ -103,51 +103,21 @@
     </div>
   </section>
 
-  <section class="card" id="update-card">
-    <h2>版本与更新
-      <button class="btn small" id="check-update">检查更新</button>
-    </h2>
-    <div class="status-grid">
-      <div class="status-item"><div class="k">当前版本</div><div id="up-current">-</div></div>
-      <div class="status-item"><div class="k">最新版本</div><div id="up-latest">-</div></div>
-      <div class="status-item" style="grid-column: 1 / -1"><div class="k">更新状态</div><div id="up-info">—</div></div>
-    </div>
-  </section>
-
   <section class="card">
     <h2>入站对接（孩子语音 → 传话筒）</h2>
     <div class="hint" style="margin:0 0 10px">
-      孩子的语音由 MIoT 插件轮询，需要把本插件登记为它的「对话 Webhook」。选择对接方式：
-    </div>
-    <div class="seg" id="inbound-seg">
-      <button type="button" data-mode="auto">自动注册（推荐）</button>
-      <button type="button" data-mode="manual">手动填写</button>
+      插件会<b>自动</b>把本插件登记为 MIoT 的「对话 Webhook」，你无需手动操作。
     </div>
 
     <div class="url-row">
       <input type="text" id="inbound-url" readonly placeholder="打开页面后自动生成">
       <button type="button" class="btn" id="copy-url">复制地址</button>
     </div>
+    <div class="hint">上方地址由插件按你的 Songloft 地址自动生成，仅供查看。</div>
 
-    <!-- 需要填写的地址说明（两种模式共用，常显） -->
-    <div class="step" style="margin-top:10px">
-      需要登记到 MIoT 的 Webhook 地址就是<b>上面这一条</b>（已自动按你的 Songloft 地址生成，直接复制即可）。
-    </div>
-
-    <!-- 自动 -->
-    <div class="mode-pane show" id="pane-auto">
-      <div class="step">当前为<b>自动模式</b>：插件自动调用 MIoT 接口完成注册，你无需手动操作。</div>
-      <div class="actions" style="margin-top:8px">
-        <button type="button" class="btn primary" id="register-now">立即注册 / 检查</button>
-        <span id="register-status" style="font-size:13px"></span>
-      </div>
-    </div>
-
-    <!-- 手动 -->
-    <div class="mode-pane" id="pane-manual">
-      <div class="step">① 点上方「<b>复制地址</b>」拿到 Webhook 地址</div>
-      <div class="step">② 打开 <b>智能音箱插件 → 语音 → Webhook 回调</b></div>
-      <div class="step">③ 名称随意（如「传话筒」），URL 粘贴刚才复制的地址，点「<b>添加</b>」</div>
+    <div class="actions" style="margin-top:10px">
+      <button type="button" class="btn primary" id="register-now">立即注册 / 检查</button>
+      <span id="register-status" style="font-size:13px"></span>
     </div>
   </section>
 
@@ -171,17 +141,13 @@
     </div>
     <div class="row">
       <label class="field">
-        <span>手动会话 chatid（留空 = 自动捕获；机器人推送不通时填此项）</span>
-        <input type="text" id="cfg-manualChatid" placeholder="如 ZhangSan 或 群聊 chatid">
+        <span>会话 chatid（留空 = 机器人收到消息时自动记住；推送不通时可手动填写）</span>
+        <input type="text" id="cfg-chatid" placeholder="单聊填企微 userid，群聊填群 chatid">
       </label>
-      <div class="field" style="flex:1 1 220px">
-        <span>当前生效 chatid / 来源</span>
-        <div id="chatid-info" style="font-size:13px;padding:8px 0">—</div>
-      </div>
     </div>
     <div class="hint">
-      孩子→大人：填了群机器人 Webhook 即走它推送（最可靠，无需 chatid）；留空则走智能机器人长连接，需要会话 chatid。<br>
-      chatid 获取：正常情况下你<b>先在机器人单聊里发一句话</b>，插件自动捕获；自动捕获失败（如单聊无 chatid）可在上方手动填写——单聊填你的企微 userid，群聊填该群 chatid。<br>
+      孩子→大人：填了群机器人 Webhook 即走它推送（最可靠，无需 chatid）；留空则走智能机器人长连接，需要 chatid。<br>
+      chatid 会持久化保存：你在机器人里发过话会自动记住；也可在上方手动填写后保存，刷新页面不会丢失。<br>
       大人→孩子：必须配置智能机器人 Bot ID / Secret，本插件通过长连接接收你的打字。
     </div>
   </section>

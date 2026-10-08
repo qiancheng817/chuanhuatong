@@ -1,17 +1,16 @@
 /*
- * 传话筒（chuanhuatong）v2 — Songloft JS 插件（纯插件，无需中间件）
+ * 传话筒（chuanhuatong）— Songloft JS 插件（纯插件，无需中间件）
  *
  * 依赖：songloft-plugin-miot（官方 MIoT 插件，负责小米登录 / 设备 / 对话监听 / TTS）
  *
  * 消息流：
- *   孩子对小爱说「告诉爸爸，xxx」
- *     -> MIoT 对话监听 webhook POST /relay/inbound（本插件，免 JWT）
+ *   孩子对小爱说「告诉爸爸/妈妈，xxx」
+ *     -> MIoT 对话监听 -> 本插件自动注册的对话 webhook -> /relay/inbound
  *     -> 本插件推送企业微信（群机器人 webhook，或智能机器人长连接）
- *   爸爸在企业微信「智能机器人」会话打字
- *     -> 本插件 WebSocket 长连接（wss://openws.work.weixin.qq.com）收到
- *     -> 调用 MIoT 的 /mina/tts（宿主 JWT）让小爱播报「爸爸说，xxx」
+ *   大人在企业微信「智能机器人」会话打字
+ *     -> 本插件 WebSocket 长连接收到 -> 调 MIoT /mina/tts 让小爱直接播报
  *
- * 活跃的 WebSocket 长连接会阻止插件被空闲休眠（宿主 HealthChecker 机制）。
+ * 活跃 WebSocket 长连接会阻止插件被空闲休眠（宿主 HealthChecker 机制）。
  * 运行环境：Songloft QuickJS（ES2020）。
  */
 (function () {
@@ -20,14 +19,8 @@
   var CONFIG_KEY = "config";
   var MESSAGES_KEY = "messages";
   var DEVICE_KEY = "last_device";
-  var CHATID_KEY = "last_chatid";
-  var UPDATE_KEY = "update_state";
   var MAX_MESSAGES = 200;
-
-  var PLUGIN_VERSION = "2.3.0";
-  // 远程更新清单（随仓库发布，内容为最新版本号与下载地址）
-  var UPDATE_MANIFEST_URL =
-    "https://cdn.jsdelivr.net/gh/qiancheng817/chuanhuatong@main/updates.json";
+  var PLUGIN_VERSION = "2.4.0";
 
   var WECOM_WS_URL = "wss://openws.work.weixin.qq.com";
   var CMD_SUBSCRIBE = "aibot_subscribe";
@@ -37,43 +30,37 @@
   var CMD_PING = "ping";
 
   // ----------------------------------------------------------------
-  // 默认配置 / 规范化
+  // 默认配置
   // ----------------------------------------------------------------
   function defaultConfig() {
     return {
-      // 企微智能机器人（长连接：接收爸爸回话 + 可选主动推送）
+      // 企微智能机器人（长连接）
       botId: "",
       botSecret: "",
-      // 企微群机器人 webhook（孩子→爸爸推送，最简单可靠）；留空则走智能机器人长连接
+      // 群机器人 webhook（孩子→大人，可选；填了优先用它推送）
       groupWebhookUrl: "",
-      // 手动指定智能机器人会话 chatid（自动捕获失败时兜底）；留空 = 自动捕获
-      manualChatid: "",
-      // 唤醒词：孩子语音必须以其中一个开头（三种称呼，含常见口语变体）
+      // 会话 chatid：可手动填写，也会在机器人收到消息时自动记住；二者同一字段
+      chatid: "",
+      // 唤醒词
       wakeKeywords: [
         "告诉爸爸和妈妈", "告诉爸爸妈妈", "告诉爸妈",
         "告诉爸爸", "告诉妈妈"
       ],
       stripKeyword: true,
       senderName: "孩子",
-      // 回话播报前缀：留空则直接播报内容
-      replyPrefix: "",
+      replyPrefix: "",            // 播报前缀，留空 = 直接播报
       confirmText: "已转告小爱音箱",
-      // MIoT 插件 entryPath
       miotEntry: "miot",
-      // 入站对接方式：auto = 插件自动向 MIoT 注册对话 webhook；manual = 用户手动填写
-      inboundMode: "auto",
-      // 目标音箱（留空则使用最近一次 webhook 上报的设备）
       targetAccountId: "",
       targetDeviceId: ""
     };
   }
 
   var FIELD_TYPES = {
-    botId: "string", botSecret: "string", groupWebhookUrl: "string", manualChatid: "string",
+    botId: "string", botSecret: "string", groupWebhookUrl: "string", chatid: "string",
     wakeKeywords: "array", stripKeyword: "bool",
     senderName: "string", replyPrefix: "string", confirmText: "string",
-    miotEntry: "string", inboundMode: "string",
-    targetAccountId: "string", targetDeviceId: "string"
+    miotEntry: "string", targetAccountId: "string", targetDeviceId: "string"
   };
 
   function normalizeConfig(incoming) {
@@ -95,7 +82,6 @@
       }
     });
     if (!c.miotEntry) c.miotEntry = "miot";
-    if (c.inboundMode !== "auto" && c.inboundMode !== "manual") c.inboundMode = "auto";
     if (!c.wakeKeywords.length) c.wakeKeywords = defaultConfig().wakeKeywords;
     return c;
   }
@@ -104,15 +90,14 @@
   var messages = [];
   var msgSeq = 0;
   var lastDevice = { account_id: "", device_id: "", device_name: "" };
-  var lastChatid = "";
 
-  // 入站 webhook 对接状态（最近一次检查/注册结果）
+  // 自动注册状态
   var inboundState = {
     url: "",
-    registered: false,   // MIoT 中是否已注册指向本插件的 webhook
-    checking: false,
-    detail: "",          // 失败原因
-    lastChecked: 0
+    registered: false,
+    working: false,
+    detail: "",
+    lastCheckedText: ""
   };
 
   // ----------------------------------------------------------------
@@ -127,13 +112,10 @@
   }
   function nextId() {
     msgSeq += 1;
-    return nowMs().toString(36) + "-" + msgSeq + "-" + Math.floor(Math.random() * 1e6).toString(36);
+    return nowMs().toString(36) + "-" + msgSeq + "-" +
+      Math.floor(Math.random() * 1e6).toString(36);
   }
   function trimSlash(s) { return ("" + s).replace(/\/+$/, ""); }
-  function uuid() {
-    return "id-" + nowMs().toString(36) + "-" + Math.floor(Math.random() * 1e9).toString(36) +
-      "-" + (++msgSeq);
-  }
 
   function jsonResponse(obj, status) {
     return {
@@ -150,18 +132,6 @@
   function jsonFail(error, status) {
     return jsonResponse({ ok: false, error: "" + error }, status || 400);
   }
-  function parseQuery(qs) {
-    var out = {};
-    if (!qs) return out;
-    ("" + qs).split("&").forEach(function (part) {
-      if (!part) return;
-      var i = part.indexOf("=");
-      var key = decodeURIComponent(i < 0 ? part : part.slice(0, i));
-      var val = i < 0 ? "" : decodeURIComponent(part.slice(i + 1).replace(/\+/g, " "));
-      out[key] = val;
-    });
-    return out;
-  }
   function parseJsonBody(req) {
     if (!req.body) return {};
     try {
@@ -171,7 +141,7 @@
   }
 
   // ----------------------------------------------------------------
-  // 存储
+  // 存储（config 是唯一配置出口；chatid 就在 config 内，天然持久化）
   // ----------------------------------------------------------------
   async function loadState() {
     try {
@@ -185,13 +155,20 @@
       var d = await songloft.storage.get(DEVICE_KEY);
       if (d && typeof d === "object") lastDevice = d;
     } catch (e) {}
-    try {
-      lastChatid = ("" + (await songloft.storage.get(CHATID_KEY) || ""));
-    } catch (e) {}
   }
-  async function saveConfig() { await songloft.storage.set(CONFIG_KEY, config); }
-  async function saveDevice() { await songloft.storage.set(DEVICE_KEY, lastDevice); }
-  async function saveChatid() { await songloft.storage.set(CHATID_KEY, lastChatid); }
+  async function saveConfig() {
+    await songloft.storage.set(CONFIG_KEY, config);
+  }
+  async function saveDevice() {
+    await songloft.storage.set(DEVICE_KEY, lastDevice);
+  }
+
+  async function rememberChatid(c) {
+    c = ("" + (c || "")).trim();
+    if (!c || c === config.chatid) return;
+    config.chatid = c;
+    await saveConfig();
+  }
 
   async function addMessage(rec) {
     rec.id = nextId();
@@ -232,18 +209,18 @@
   }
 
   // ----------------------------------------------------------------
-  // 唤醒词
+  // 唤醒词（最长优先）
   // ----------------------------------------------------------------
   function matchWake(text) {
     var t = ("" + (text || "")).trim();
-    // 按关键词长度降序匹配（最长优先），防止「告诉爸爸和妈妈」被「告诉爸爸」抢先命中
     var kws = (config.wakeKeywords || []).slice().sort(function (a, b) {
       return ("" + b).length - ("" + a).length;
     });
     for (var i = 0; i < kws.length; i++) {
       var kw = ("" + kws[i]).trim();
       if (kw && t.indexOf(kw) === 0) {
-        var rest = t.slice(kw.length).replace(/^[\s，,：:、]+/, "").replace(/[\s。.！!]+$/, "").trim();
+        var rest = t.slice(kw.length).replace(/^[\s，,：:、]+/, "")
+          .replace(/[\s。.！!]+$/, "").trim();
         return { keyword: kw, content: rest };
       }
     }
@@ -251,97 +228,9 @@
   }
 
   // ----------------------------------------------------------------
-  // 企微推送（孩子 → 爸爸）
+  // 企微推送（孩子 → 大人）
   // ----------------------------------------------------------------
-  // 生效的会话 chatid：手动配置优先，其次自动捕获
-  function getEffectiveChatid() {
-    return (config.manualChatid || lastChatid || "").trim();
-  }
-
-  // ----------------------------------------------------------------
-  // 更新检测
-  // ----------------------------------------------------------------
-  var updateState = {
-    currentVersion: PLUGIN_VERSION,
-    latestVersion: "",
-    hasUpdate: false,
-    downloadUrl: "",
-    notes: "",
-    checking: false,
-    checkedText: "",
-    detail: ""
-  };
-
-  // 语义化版本比较：a>b 返回 1，相等 0，a<b -1
-  function compareVersion(a, b) {
-    function parts(v) {
-      return ("" + v).split(".").map(function (n) {
-        n = parseInt(n, 10);
-        return isNaN(n) ? 0 : n;
-      });
-    }
-    var pa = parts(a), pb = parts(b);
-    var len = Math.max(pa.length, pb.length);
-    for (var i = 0; i < len; i++) {
-      var x = pa[i] || 0, y = pb[i] || 0;
-      if (x !== y) return x > y ? 1 : -1;
-    }
-    return 0;
-  }
-
-  async function checkUpdate(force) {
-    if (updateState.checking) return updateState;
-    updateState.checking = true;
-    try {
-      var r = await httpRequest("GET", UPDATE_MANIFEST_URL, null);
-      if (!r.ok || !r.data) {
-        updateState.detail = r.error || ("HTTP " + r.status);
-      } else {
-        var data = r.data;
-        updateState.latestVersion = "" + (data.version || "");
-        updateState.downloadUrl = "" + (data.download_url || data.downloadUrl || "");
-        updateState.notes = "" + (data.notes || "");
-        updateState.hasUpdate = !!updateState.latestVersion &&
-          compareVersion(updateState.latestVersion, PLUGIN_VERSION) > 0;
-        updateState.detail = "";
-      }
-      updateState.checkedText = formatTime(nowMs());
-      await persistUpdateState();
-    } finally {
-      updateState.checking = false;
-    }
-    return updateState;
-  }
-
-  async function loadUpdateState() {
-    try {
-      var s = await songloft.storage.get(UPDATE_KEY);
-      if (s && typeof s === "object") {
-        updateState.latestVersion = s.latestVersion || "";
-        updateState.downloadUrl = s.downloadUrl || "";
-        updateState.notes = s.notes || "";
-        updateState.hasUpdate = !!s.hasUpdate;
-        updateState.checkedText = s.checkedText || "";
-        updateState.detail = s.detail || "";
-      }
-    } catch (e) {}
-  }
-
-  async function persistUpdateState() {
-    try {
-      await songloft.storage.set(UPDATE_KEY, {
-        latestVersion: updateState.latestVersion,
-        downloadUrl: updateState.downloadUrl,
-        notes: updateState.notes,
-        hasUpdate: updateState.hasUpdate,
-        checkedText: updateState.checkedText,
-        detail: updateState.detail
-      });
-    } catch (e) {}
-  }
-
   async function pushToWecom(content) {
-    // 优先：群机器人 webhook（无需会话、最可靠）
     if (config.groupWebhookUrl) {
       var r = await httpRequest("POST", config.groupWebhookUrl, {
         msgtype: "text",
@@ -351,38 +240,38 @@
         return { ok: false, error: r.data.errmsg || "群机器人返回错误" };
       }
       if (!r.ok) return { ok: false, error: r.error || ("HTTP " + r.status) };
-      return { ok: true, via: "group-webhook" };
+      return { ok: true, via: "群机器人" };
     }
-    // 回退：智能机器人长连接主动推送（需要会话 chatid）
-    var chatid = getEffectiveChatid();
-    if (wecom.state === "open" && chatid) {
-      var sent = wecom.send(chatid, content);
-      return sent ? { ok: true, via: "aibot-ws" } : { ok: false, error: "智能机器人发送失败" };
+    if (wecom.state === "open" && config.chatid) {
+      var sent = wecom.send(config.chatid, content);
+      return sent ? { ok: true, via: "智能机器人" } :
+        { ok: false, error: "智能机器人发送失败" };
     }
-    return { ok: false, error: "智能机器人推送失败：未配置群机器人 webhook，且无可用会话 chatid（可在配置页手动填写，或先在机器人里发一句话）" };
+    return {
+      ok: false,
+      error: "无可推送通道：请填写群机器人 webhook；或先在智能机器人里发一句话（自动记住会话），也可手动填写 chatid"
+    };
   }
 
   // ----------------------------------------------------------------
-  // MIoT TTS（爸爸 → 小爱播报）
+  // MIoT TTS（大人 → 小爱播报）
   // ----------------------------------------------------------------
   async function resolveTarget() {
-    var accountId = config.targetAccountId || lastDevice.account_id;
-    var deviceId = config.targetDeviceId || lastDevice.device_id;
-    return { account_id: accountId, device_id: deviceId };
+    return {
+      account_id: config.targetAccountId || lastDevice.account_id,
+      device_id: config.targetDeviceId || lastDevice.device_id
+    };
   }
 
-  // 宿主地址 + 插件 JWT
   async function getHostContext() {
-    var host = trimSlash(await songloft.plugin.getHostUrl());
-    var jwt = await songloft.plugin.getToken();
-    return { host: host, jwt: jwt };
+    return {
+      host: trimSlash(await songloft.plugin.getHostUrl()),
+      jwt: await songloft.plugin.getToken()
+    };
   }
-
   function miotApiBase(ctx) {
     return ctx.host + "/api/v1/jsplugin/" + encodeURIComponent(config.miotEntry);
   }
-
-  // 本插件接收对话 webhook 的地址（MIoT 服务器内部自访问）
   function buildInboundUrl(ctx) {
     return ctx.host + "/api/v1/jsplugin/chuanhuatong/relay/inbound";
   }
@@ -390,7 +279,7 @@
   async function callMiotTTS(speakText) {
     var t = await resolveTarget();
     if (!t.account_id || !t.device_id) {
-      return { ok: false, error: "目标音箱未知：请让孩子先说一次（自动记住设备），或在配置中手动指定" };
+      return { ok: false, error: "目标音箱未知：请让孩子先说一次，或在高级设置里手动指定 account_id / device_id" };
     }
     var ctx;
     try {
@@ -398,14 +287,13 @@
     } catch (e) {
       return { ok: false, error: "获取宿主地址/JWT 失败：" + e };
     }
-    var url = miotApiBase(ctx) + "/mina/tts";
-    var r = await httpRequest("POST", url, {
+    var r = await httpRequest("POST", miotApiBase(ctx) + "/mina/tts", {
       account_id: t.account_id,
       device_id: t.device_id,
       text: speakText
     }, { Authorization: "Bearer " + ctx.jwt });
 
-    if (!r.ok) return { ok: false, error: r.error || ("HTTP " + r.status + " " + r.text) };
+    if (!r.ok) return { ok: false, error: r.error || ("HTTP " + r.status) };
     if (r.data && r.data.success === false) {
       return { ok: false, error: r.data.error || "MIoT TTS 调用失败" };
     }
@@ -413,108 +301,85 @@
   }
 
   // ----------------------------------------------------------------
-  // 入站 webhook 自动注册（本插件 → MIoT 对话 webhook）
+  // 入站 webhook 自动注册
   // ----------------------------------------------------------------
-  // 查询 MIoT 中现有对话 webhook，判断 inbound URL 是否已注册
-  async function queryInboundRegistered(ctx) {
-    var url = miotApiBase(ctx) + "/conversation/webhooks";
-    var r = await httpRequest("GET", url, null, { Authorization: "Bearer " + ctx.jwt });
-    if (!r.ok) return { ok: false, error: "无法连接 MIoT（" + (r.error || ("HTTP " + r.status)) +
-      "），请确认 MIoT 插件已安装且 entryPath 为 " + config.miotEntry };
+  async function queryMiotWebhooks(ctx) {
+    var r = await httpRequest(
+      "GET", miotApiBase(ctx) + "/conversation/webhooks", null,
+      { Authorization: "Bearer " + ctx.jwt }
+    );
+    if (!r.ok) {
+      return { ok: false, error: "无法连接 MIoT（" + (r.error || ("HTTP " + r.status)) +
+        "），确认 MIoT 插件已安装、entryPath 为 " + config.miotEntry };
+    }
     if (r.data && r.data.success === false) {
       return { ok: false, error: r.data.error || "MIoT 返回错误" };
     }
-    var list = (r.data && Array.isArray(r.data.data)) ? r.data.data : [];
-    var inboundUrl = buildInboundUrl(ctx);
-    var found = false;
-    for (var i = 0; i < list.length; i++) {
-      if (list[i] && list[i].url === inboundUrl) { found = true; break; }
-    }
-    return { ok: true, registered: found, webhooks: list, url: inboundUrl };
+    return { ok: true, list: Array.isArray(r.data.data) ? r.data.data : [] };
   }
 
-  // 检查（只读）并刷新 inboundState
-  async function checkInbound() {
-    if (inboundState.checking) return inboundState;
-    inboundState.checking = true;
+  // 自动注册（幂等）：返回供页面直接提示
+  async function registerInbound() {
+    inboundState.working = true;
     try {
       var ctx;
       try {
         ctx = await getHostContext();
       } catch (e) {
-        inboundState.registered = false;
         inboundState.detail = "获取宿主地址/JWT 失败：" + e;
-        inboundState.lastChecked = nowMs();
-        return inboundState;
+        inboundState.registered = false;
+        return { ok: false, error: inboundState.detail };
       }
-      var q = await queryInboundRegistered(ctx);
-      inboundState.url = q.url || buildInboundUrl(ctx);
-      inboundState.lastChecked = nowMs();
+      var inboundUrl = buildInboundUrl(ctx);
+      inboundState.url = inboundUrl;
+
+      var q = await queryMiotWebhooks(ctx);
       if (!q.ok) {
         inboundState.registered = false;
         inboundState.detail = q.error;
-      } else {
-        inboundState.registered = q.registered;
-        inboundState.detail = "";
+        return { ok: false, error: q.error };
       }
-    } finally {
-      inboundState.checking = false;
-    }
-    return inboundState;
-  }
 
-  // 自动注册：已注册则跳过，否则 POST 给 MIoT（幂等）
-  async function registerInbound() {
-    var ctx;
-    try {
-      ctx = await getHostContext();
-    } catch (e) {
-      return { ok: false, error: "获取宿主地址/JWT 失败：" + e };
-    }
+      var exists = false;
+      for (var i = 0; i < q.list.length; i++) {
+        if (q.list[i] && q.list[i].url === inboundUrl) { exists = true; break; }
+      }
+      if (exists) {
+        inboundState.registered = true;
+        inboundState.detail = "";
+        inboundState.lastCheckedText = formatTime(nowMs());
+        return { ok: true, already: true };
+      }
 
-    var inboundUrl = buildInboundUrl(ctx);
-    inboundState.url = inboundUrl;
+      var r = await httpRequest(
+        "POST", miotApiBase(ctx) + "/conversation/webhooks",
+        { url: inboundUrl, name: "传话筒" },
+        { Authorization: "Bearer " + ctx.jwt }
+      );
+      if (!r.ok || (r.data && r.data.success === false)) {
+        inboundState.registered = false;
+        inboundState.detail = (!r.ok)
+          ? (r.error || ("HTTP " + r.status))
+          : (r.data.error || "MIoT 注册失败");
+        return { ok: false, error: inboundState.detail };
+      }
 
-    var q = await queryInboundRegistered(ctx);
-    if (!q.ok) return { ok: false, error: q.error };
-    if (q.registered) {
       inboundState.registered = true;
       inboundState.detail = "";
-      inboundState.lastChecked = nowMs();
-      return { ok: true, already: true };
+      inboundState.lastCheckedText = formatTime(nowMs());
+      songloft.log.info("已向 MIoT 注册对话 webhook: " + inboundUrl);
+      return { ok: true, already: false };
+    } finally {
+      inboundState.working = false;
     }
-
-    var r = await httpRequest(
-      "POST", miotApiBase(ctx) + "/conversation/webhooks",
-      { url: inboundUrl, name: "传话筒" },
-      { Authorization: "Bearer " + ctx.jwt }
-    );
-    inboundState.lastChecked = nowMs();
-    if (!r.ok) {
-      inboundState.registered = false;
-      inboundState.detail = r.error || ("HTTP " + r.status + " " + r.text);
-      return { ok: false, error: inboundState.detail };
-    }
-    if (r.data && r.data.success === false) {
-      inboundState.registered = false;
-      inboundState.detail = r.data.error || "MIoT 注册失败";
-      return { ok: false, error: inboundState.detail };
-    }
-    inboundState.registered = true;
-    inboundState.detail = "";
-    songloft.log.info("已自动向 MIoT 注册对话 webhook: " + inboundUrl);
-    return { ok: true };
   }
 
   // ----------------------------------------------------------------
-  // 入站 webhook（MIoT 对话监听 → 本插件）
-  // 路径 /relay/inbound 已在 publicPaths，无需 JWT
+  // 入站（MIoT → 本插件），路径 /relay/inbound 免 JWT
   // ----------------------------------------------------------------
   function extractSpokenTexts(msg) {
-    // msg = ConversationMessage { message: { response: { answer: [...] } } }
     var out = [];
-    var inner = msg && msg.message;
-    var answers = inner && inner.response && inner.response.answer;
+    var answers = msg && msg.message && msg.message.response && msg.message.response.answer;
     if (Array.isArray(answers)) {
       answers.forEach(function (a) {
         var t = a.question || (a.intention && a.intention.query) || "";
@@ -528,7 +393,6 @@
     var body = parseJsonBody(req);
     if (body == null) return jsonFail("bad json", 400);
 
-    // 记住上报设备（用于后续 TTS 回传）
     if (body.account_id || body.device_id) {
       lastDevice = {
         account_id: "" + (body.account_id || ""),
@@ -546,36 +410,25 @@
       for (var j = 0; j < texts.length; j++) {
         var raw = texts[j];
         var m = matchWake(raw);
-        if (!m) continue; // 非传话内容，忽略
+        if (!m) continue;
 
         var content = config.stripKeyword ? m.content : raw;
         if (!content) continue;
 
         await addMessage({
-          dir: "in",
-          channel: "xiaoai",
-          sender: config.senderName,
-          text: content,
-          raw: raw,
-          device: lastDevice.device_name,
-          status: "pending",
-          detail: ""
+          dir: "in", sender: config.senderName, text: content, raw: raw,
+          device: lastDevice.device_name, status: "pending", detail: ""
         });
 
-        var pushText = "【" + config.senderName + "传话】" + content;
-        var r = await pushToWecom(pushText);
-
+        var r = await pushToWecom("【" + config.senderName + "传话】" + content);
         await setLatest({
           status: r.ok ? "delivered" : "failed",
-          detail: r.ok ? "" : (r.error || "推送失败"),
-          via: r.via || ""
+          detail: r.ok ? "" : (r.error || "推送失败"), via: r.via || ""
         });
-        processed.push({ text: content, ok: r.ok, error: r.ok ? "" : r.error });
+        processed.push({ ok: r.ok });
       }
     }
-
-    // 对 MIoT webhook 始终返回 200，避免其重试
-    return jsonOk({ received: list.length, matched: processed.length, results: processed });
+    return jsonOk({ received: list.length, matched: processed.length });
   }
 
   // ----------------------------------------------------------------
@@ -583,20 +436,15 @@
   // ----------------------------------------------------------------
   var wecom = {
     socket: null,
-    state: "idle",        // idle | connecting | authenticating | open
+    state: "idle",
     manualStop: false,
     authReqId: "",
     pingTimer: 0,
     reconnectAttempts: 0,
 
-    reset: function () {
-      this.socket = null;
-      this.pingTimer = 0;
-    },
-
     connect: function () {
       if (!config.botId || !config.botSecret) {
-        songloft.log.warn("企微智能机器人未配置 botId/botSecret，跳过长连接");
+        songloft.log.warn("未配置 botId/botSecret，跳过企微长连接");
         return;
       }
       this.manualStop = false;
@@ -605,7 +453,7 @@
       try {
         ws = new WebSocket(WECOM_WS_URL);
       } catch (e) {
-        songloft.log.error("new WebSocket failed: " + e);
+        songloft.log.error("new WebSocket: " + e);
         this.scheduleReconnect();
         return;
       }
@@ -621,17 +469,13 @@
           body: { bot_id: config.botId, secret: config.botSecret }
         }));
       };
-
       ws.onmessage = function (ev) { self.handleFrame(ev.data); };
-
       ws.onclose = function () {
         self.state = "idle";
         if (self.pingTimer) { clearInterval(self.pingTimer); self.pingTimer = 0; }
         if (!self.manualStop) self.scheduleReconnect();
       };
-
       ws.onerror = function () {
-        // close 事件会随后触发并负责重连
         try { ws.close(); } catch (e) {}
       };
     },
@@ -640,9 +484,8 @@
       var frame;
       try { frame = JSON.parse(data); } catch (e) { return; }
 
-      // 认证结果
       if (this.state === "authenticating" &&
-          (frame.headers && frame.headers.req_id === this.authReqId)) {
+          frame.headers && frame.headers.req_id === this.authReqId) {
         if (frame.errcode === 0) {
           this.state = "open";
           this.reconnectAttempts = 0;
@@ -656,18 +499,14 @@
         return;
       }
 
-      if (this.state !== "open") return;
-
-      // 心跳响应 / 其他 ack
-      if (frame.cmd !== CMD_MSG) return;
+      if (this.state !== "open" || frame.cmd !== CMD_MSG) return;
 
       var body = frame.body || {};
       if (body.msgtype === "text") {
-        var content = (body.text && body.text.content || "").trim();
+        var content = ((body.text && body.text.content) || "").trim();
         var reqId = frame.headers && frame.headers.req_id;
-        // 群聊取 chatid；单聊常无 chatid，回退发送方 userid
-        var captured = body.chatid || body.from_userid || "";
-        if (captured) { lastChatid = "" + captured; saveChatid(); }
+        // 群聊用 chatid；单聊常无 chatid，回退发送方 userid
+        rememberChatid(body.chatid || body.from_userid || "");
         if (content) this.handleIncomingText(content, reqId);
       }
     },
@@ -680,39 +519,30 @@
           try {
             self.socket.send(JSON.stringify({
               cmd: CMD_PING,
-              headers: { req_id: CMD_PING + "_" + nowMs() }
+              headers: reqHeader()
             }));
           } catch (e) {}
         }
       }, 30000);
     },
 
-    // 处理爸爸的回话：记录 → 调 MIoT TTS → 回执
     handleIncomingText: async function (text, reqId) {
       songloft.log.info("企微收到回话: " + text);
       await addMessage({
-        dir: "out",
-        channel: "wecom",
-        text: text,
-        status: "pending",
-        detail: ""
+        dir: "out", text: text, status: "pending", detail: ""
       });
 
       var speakText = config.replyPrefix ? (config.replyPrefix + "，" + text) : text;
       var r = await callMiotTTS(speakText);
-
       await setLatest({
         speakText: speakText,
         status: r.ok ? "broadcast" : "failed",
         detail: r.ok ? "" : (r.error || "播报失败")
       });
 
-      // 被动回复确认（必须在收到消息后较短时间内）
       if (reqId) {
-        var replyText = r.ok
-          ? (config.confirmText || "好的")
-          : ("转告失败：" + (r.error || "未知错误"));
-        this.respond(reqId, replyText);
+        this.respond(reqId, r.ok ? (config.confirmText || "好的")
+          : ("转告失败：" + (r.error || "未知错误")));
       }
     },
 
@@ -725,12 +555,11 @@
         }));
         return true;
       } catch (e) {
-        songloft.log.error("企微 respond 失败: " + e);
+        songloft.log.error("respond: " + e);
         return false;
       }
     },
 
-    // 主动推送（给指定 chatid）
     send: function (chatid, text) {
       try {
         this.socket.send(JSON.stringify({
@@ -744,7 +573,7 @@
         }));
         return true;
       } catch (e) {
-        songloft.log.error("企微 send 失败: " + e);
+        songloft.log.error("send: " + e);
         return false;
       }
     },
@@ -752,7 +581,8 @@
     scheduleReconnect: function () {
       var self = this;
       this.reconnectAttempts += 1;
-      var delay = Math.min(1000 * Math.pow(2, Math.max(0, this.reconnectAttempts - 1)), 30000);
+      var delay = Math.min(
+        1000 * Math.pow(2, Math.max(0, this.reconnectAttempts - 1)), 30000);
       songloft.log.warn("企微长连接断开，" + Math.round(delay / 1000) + "s 后重连");
       setTimeout(function () {
         if (!self.manualStop) self.connect();
@@ -767,82 +597,48 @@
     }
   };
 
+  function reqHeader() {
+    return { req_id: CMD_PING + "_" + nowMs() };
+  }
+
   // ----------------------------------------------------------------
-  // 配置 / 查询 / 测试 API（JWT 保护）
+  // 配置 / 查询 API（JWT 保护）
   // ----------------------------------------------------------------
   function handleStatus() {
     return jsonOk({
+      version: PLUGIN_VERSION,
       wecom: {
         wsState: wecom.state,
         botConfigured: !!(config.botId && config.botSecret),
         groupWebhookConfigured: !!config.groupWebhookUrl,
-        manualChatid: config.manualChatid,
-        autoChatid: lastChatid,
-        chatid: getEffectiveChatid(),
-        chatidSource: config.manualChatid ? "manual" : (lastChatid ? "auto" : "")
+        chatid: config.chatid
       },
-      miot: {
-        entry: config.miotEntry,
-        lastDevice: lastDevice
-      },
-      inbound: {
-        mode: config.inboundMode,
-        url: inboundState.url,
-        registered: inboundState.registered,
-        detail: inboundState.detail,
-        lastChecked: inboundState.lastChecked,
-        lastCheckedText: inboundState.lastChecked ? formatTime(inboundState.lastChecked) : ""
-      },
-      update: {
-        currentVersion: PLUGIN_VERSION,
-        latestVersion: updateState.latestVersion,
-        hasUpdate: updateState.hasUpdate,
-        downloadUrl: updateState.downloadUrl,
-        notes: updateState.notes,
-        checking: updateState.checking,
-        checkedText: updateState.checkedText,
-        detail: updateState.detail
-      },
+      device: lastDevice,
+      inbound: inboundState,
       wakeKeywords: config.wakeKeywords,
       messageCount: messages.length,
       serverTimeText: formatTime(nowMs())
     });
   }
 
-  async function handleUpdateCheck() {
-    var s = await checkUpdate(true);
-    return jsonOk({ update: s });
-  }
-
   async function handleSetConfig(req) {
     var body = parseJsonBody(req);
     if (body == null) return jsonFail("bad json", 400);
     var incoming = body.config && typeof body.config === "object" ? body.config : body;
+
     var oldBotId = config.botId, oldSecret = config.botSecret;
     config = normalizeConfig(incoming);
     await saveConfig();
 
-    // 机器人凭据变化时重连
     if (oldBotId !== config.botId || oldSecret !== config.botSecret) {
       wecom.stop();
       setTimeout(function () { wecom.connect(); }, 500);
     }
-    songloft.log.info("config saved; ws=" + wecom.state + ", inbound=" + config.inboundMode);
 
-    // auto 模式：保存后自动向 MIoT 注册（延迟，避开重连/加载）
-    if (config.inboundMode === "auto") {
-      setTimeout(function () {
-        registerInbound().then(function (r) {
-          if (!r.ok) songloft.log.warn("自动注册 webhook 失败：" + r.error);
-        });
-      }, 1500);
-    }
+    // 保存后自动确保 MIoT webhook 已注册
+    setTimeout(function () { registerInbound(); }, 1200);
+
     return jsonOk({ config: config });
-  }
-
-  async function handleInboundCheck() {
-    var s = await checkInbound();
-    return jsonOk({ inbound: s });
   }
 
   async function handleInboundRegister() {
@@ -854,57 +650,40 @@
   async function handleTest(req) {
     var body = parseJsonBody(req);
     if (body == null) return jsonFail("bad json", 400);
-    var target = body.target || "";
     var text = body.text || "传话筒连通性测试";
 
-    if (target === "wecom-push") {
+    if (body.target === "wecom-push") {
       var r = await pushToWecom(text);
       if (!r.ok) return jsonResponse({ ok: false, error: r.error }, 502);
-      return jsonOk({ result: "sent via " + r.via });
+      return jsonOk({ via: r.via });
     }
-    if (target === "tts") {
+    if (body.target === "tts") {
       var t = await callMiotTTS(text);
       if (!t.ok) return jsonResponse({ ok: false, error: t.error }, 502);
       return jsonOk({ result: "tts ok" });
     }
-    return jsonFail("unknown target: " + target + "（wecom-push / tts）", 400);
+    return jsonFail("unknown target（wecom-push / tts）", 400);
   }
 
   // ----------------------------------------------------------------
   // 生命周期
   // ----------------------------------------------------------------
-  // auto 模式自动注册，带延迟重试（等 MIoT 加载/登录完成）
   function autoRegisterWithRetry() {
-    var delays = [3000, 6000, 12000, 20000];
-    delays.forEach(function (d) {
-      setTimeout(function () {
-        if (config.inboundMode !== "auto") return;
-        registerInbound().then(function (r) {
-          if (!r.ok && d === delays[delays.length - 1]) {
-            songloft.log.warn("自动注册最终失败，可稍后在插件页手动点「立即注册」：" + r.error);
-          }
-        });
-      }, d);
+    [3000, 8000, 15000, 25000].forEach(function (d) {
+      setTimeout(function () { registerInbound(); }, d);
     });
   }
 
   globalThis.onInit = async function () {
     await loadState();
-    await loadUpdateState();
-    songloft.log.info("chuanhuatong initialized v" + PLUGIN_VERSION +
-      "; lastDevice=" + (lastDevice.device_name || "<none>") +
-      ", ws=" + wecom.state + ", inbound=" + config.inboundMode);
+    songloft.log.info("chuanhuatong v" + PLUGIN_VERSION + " ready; ws=" + wecom.state +
+      ", device=" + (lastDevice.device_name || "<none>"));
     if (config.botId && config.botSecret) wecom.connect();
-    if (config.inboundMode === "auto") autoRegisterWithRetry();
-
-    // 启动后延迟检查一次更新，之后每 6 小时检查一次
-    setTimeout(function () { checkUpdate(true); }, 8000);
-    setInterval(function () { checkUpdate(true); }, 6 * 60 * 60 * 1000);
+    autoRegisterWithRetry();
   };
 
   globalThis.onDeinit = function () {
     wecom.stop();
-    songloft.log.info("chuanhuatong deinitialized");
   };
 
   globalThis.onHTTPRequest = async function (req) {
@@ -912,22 +691,17 @@
       var path = req.path || "/", method = req.method || "GET";
 
       if (method === "POST" && path === "/relay/inbound") return await handleInbound(req);
-
       if (method === "GET" && (path === "/" || path === "/api/ping")) {
-        return jsonOk({ name: "chuanhuatong", version: PLUGIN_VERSION, time: formatTime(nowMs()) });
+        return jsonOk({ name: "chuanhuatong", version: PLUGIN_VERSION });
       }
       if (method === "GET" && path === "/api/status") return handleStatus();
-      if (method === "POST" && path === "/api/update/check") return await handleUpdateCheck();
       if (method === "GET" && path === "/api/config") return jsonOk({ config: config });
       if (method === "POST" && path === "/api/config") return await handleSetConfig(req);
       if (method === "GET" && path === "/api/messages") {
-        var q = parseQuery(req.query);
-        var limit = parseInt(q.limit, 10);
-        if (!limit || limit <= 0 || limit > MAX_MESSAGES) limit = 100;
-        return jsonOk({ messages: messages.slice(0, limit), total: messages.length });
+        var q = parseJsonQuery(req);
+        return jsonOk({ messages: messages.slice(0, q.limit), total: messages.length });
       }
       if (method === "POST" && path === "/api/test") return await handleTest(req);
-      if (method === "GET" && path === "/api/inbound/status") return await handleInboundCheck();
       if (method === "POST" && path === "/api/inbound/register") return await handleInboundRegister();
 
       return jsonFail("not found: " + method + " " + path, 404);
@@ -936,4 +710,17 @@
       return jsonFail("internal: " + e, 500);
     }
   };
+
+  // 小工具：messages limit
+  function parseJsonQuery(req) {
+    var limit = 100;
+    if (req.query) {
+      var m = ("" + req.query).match(/(?:^|&)limit=(\d+)/);
+      if (m) {
+        limit = parseInt(m[1], 10);
+        if (!limit || limit <= 0 || limit > MAX_MESSAGES) limit = 100;
+      }
+    }
+    return { limit: limit };
+  }
 })();

@@ -37,7 +37,7 @@
     document.getElementById("cfg-botId").value = c.botId || "";
     document.getElementById("cfg-botSecret").value = c.botSecret || "";
     document.getElementById("cfg-groupWebhookUrl").value = c.groupWebhookUrl || "";
-    document.getElementById("cfg-manualChatid").value = c.manualChatid || "";
+    document.getElementById("cfg-chatid").value = c.chatid || "";
     document.getElementById("cfg-wakeKeywords").value = (c.wakeKeywords || []).join(",");
     document.getElementById("cfg-senderName").value = c.senderName || "";
     document.getElementById("cfg-replyPrefix").value = c.replyPrefix || "";
@@ -46,19 +46,6 @@
     document.getElementById("cfg-miotEntry").value = c.miotEntry || "miot";
     document.getElementById("cfg-targetAccountId").value = c.targetAccountId || "";
     document.getElementById("cfg-targetDeviceId").value = c.targetDeviceId || "";
-    setInboundMode(c.inboundMode || "auto", true);
-  }
-
-  // --------------------------------------------------------------
-  // 入站对接模式切换
-  // --------------------------------------------------------------
-  function setInboundMode(mode, silent) {
-    if (mode !== "auto" && mode !== "manual") mode = "auto";
-    document.querySelectorAll("#inbound-seg button").forEach(function (b) {
-      b.classList.toggle("active", b.getAttribute("data-mode") === mode);
-    });
-    document.getElementById("pane-auto").classList.toggle("show", mode === "auto");
-    document.getElementById("pane-manual").classList.toggle("show", mode === "manual");
   }
 
   function readForm() {
@@ -66,14 +53,13 @@
       botId: document.getElementById("cfg-botId").value.trim(),
       botSecret: document.getElementById("cfg-botSecret").value,
       groupWebhookUrl: document.getElementById("cfg-groupWebhookUrl").value.trim(),
-      manualChatid: document.getElementById("cfg-manualChatid").value.trim(),
+      chatid: document.getElementById("cfg-chatid").value.trim(),
       wakeKeywords: document.getElementById("cfg-wakeKeywords").value,
       senderName: document.getElementById("cfg-senderName").value.trim() || "孩子",
       replyPrefix: document.getElementById("cfg-replyPrefix").value.trim(),
       confirmText: document.getElementById("cfg-confirmText").value.trim(),
       stripKeyword: document.getElementById("cfg-stripKeyword").checked,
       miotEntry: document.getElementById("cfg-miotEntry").value.trim() || "miot",
-      inboundMode: document.querySelector("#inbound-seg button.active")?.getAttribute("data-mode") || "auto",
       targetAccountId: document.getElementById("cfg-targetAccountId").value.trim(),
       targetDeviceId: document.getElementById("cfg-targetDeviceId").value.trim()
     };
@@ -121,15 +107,7 @@
       document.getElementById("st-webhook").innerHTML = s.wecom.groupWebhookConfigured
         ? badge("on", "已配置") : badge("off", "未配置");
 
-      var info = document.getElementById("chatid-info");
-      if (s.wecom.chatid) {
-        var src = { manual: "手动", auto: "自动捕获", "": "" }[s.wecom.chatidSource] || "";
-        info.innerHTML = escapeHtml(s.wecom.chatid) + ' <span class="badge info">' + src + "</span>";
-      } else {
-        info.innerHTML = '<span style="color:var(--muted)">无（请先在机器人里发一句话，或手动填写）</span>';
-      }
-
-      var dev = s.miot.lastDevice || {};
+      var dev = s.device || {};
       document.getElementById("st-device").textContent = dev.device_name || "未知";
 
       document.getElementById("st-keywords").textContent = (s.wakeKeywords || []).join(" / ");
@@ -145,8 +123,8 @@
     if (!ib) return;
     if (ib.url) document.getElementById("inbound-url").value = ib.url;
     var el = document.getElementById("register-status");
-    if (ib.checking) {
-      el.innerHTML = '<span class="badge wait">检查中</span>';
+    if (ib.working) {
+      el.innerHTML = '<span class="badge wait">处理中…</span>';
     } else if (ib.registered) {
       el.innerHTML = badge("on", "已注册") +
         (ib.lastCheckedText ? ' <span style="color:var(--muted)">' + ib.lastCheckedText + "</span>" : "");
@@ -161,54 +139,6 @@
       var r = await apiGet("/api/inbound/status");
       if (r && r.ok && r.inbound) renderInbound(r.inbound);
     } catch (e) {}
-  }
-
-  // --------------------------------------------------------------
-  // 版本更新
-  // --------------------------------------------------------------
-  function renderUpdate(u) {
-    if (!u) return;
-    document.getElementById("up-current").textContent = u.currentVersion;
-    document.getElementById("up-latest").textContent = u.latestVersion || "—";
-    var info = document.getElementById("up-info");
-    if (u.checking) {
-      info.innerHTML = '<span class="badge wait">检查中…</span>';
-    } else if (u.detail) {
-      info.innerHTML = badge("off", "检查失败") +
-        ' <span style="color:var(--fail)">' + escapeHtml(u.detail) + "</span>";
-    } else if (u.hasUpdate) {
-      info.innerHTML = badge("info", "发现新版本 v" + u.latestVersion) +
-        (u.notes ? ' <span>' + escapeHtml(u.notes) + "</span>" : "") +
-        (u.downloadUrl
-          ? ' &nbsp;<a class="btn small primary" href="' + encodeURI(u.downloadUrl) +
-            '" target="_blank">下载新版</a>' : "");
-    } else if (u.latestVersion) {
-      info.innerHTML = badge("on", "已是最新版本") +
-        (u.checkedText ? ' <span style="color:var(--muted)">' + u.checkedText + "</span>" : "");
-    } else {
-      info.innerHTML = '<span style="color:var(--muted)">尚未检查，点右上角「检查更新」</span>';
-    }
-  }
-
-  async function refreshUpdateDisplay() {
-    try {
-      var r = await apiGet("/api/status");
-      if (r && r.ok) renderUpdate(r.update);
-    } catch (e) {}
-  }
-
-  async function doCheckUpdate() {
-    var info = document.getElementById("up-info");
-    info.innerHTML = '<span class="badge wait">检查中…</span>';
-    try {
-      var r = await apiPost("/api/update/check", {});
-      if (r && r.ok && r.update) {
-        renderUpdate(r.update);
-        var u = r.update;
-        if (!u.detail && u.hasUpdate) toast("发现新版本 v" + u.latestVersion);
-        else if (!u.detail) toast("已是最新版本");
-      }
-    } catch (e) { toast("检查更新失败：" + e, 3500); }
   }
 
   async function doRegister() {
@@ -299,20 +229,12 @@
   });
   document.getElementById("register-now").addEventListener("click", doRegister);
   document.getElementById("copy-url").addEventListener("click", copyInboundUrl);
-  document.getElementById("check-update").addEventListener("click", doCheckUpdate);
-  document.querySelectorAll("#inbound-seg button").forEach(function (b) {
-    b.addEventListener("click", function () {
-      setInboundMode(b.getAttribute("data-mode"));
-    });
-  });
 
   loadConfig();
   refreshStatus();
   refreshMessages();
   refreshInbound();
-  refreshUpdateDisplay();
   setInterval(refreshStatus, 10000);
   setInterval(refreshMessages, 8000);
   setInterval(refreshInbound, 60000);
-  setInterval(refreshUpdateDisplay, 60000);
 })();
