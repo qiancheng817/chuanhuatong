@@ -66,6 +66,16 @@
   .empty { color: var(--muted); text-align: center; padding: 18px 0; }
   .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
   code { background: rgba(0,0,0,.05); padding: 1px 5px; border-radius: 4px; font-size: 12px; word-break: break-all; }
+  .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .seg button { border: none; background: #fff; padding: 7px 16px; font-size: 13px; cursor: pointer; color: var(--text); }
+  .seg button + button { border-left: 1px solid var(--border); }
+  .seg button.active { background: var(--primary); color: #fff; }
+  .url-row { display: flex; gap: 8px; margin: 8px 0 4px; }
+  .url-row input { flex: 1; background: #f7f9fc; font-size: 12.5px; }
+  .mode-pane { display: none; margin-top: 10px; }
+  .mode-pane.show { display: block; }
+  .step { font-size: 13px; margin: 6px 0; color: var(--text); }
+  .step b { color: var(--primary); }
   #toast {
     position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
     background: rgba(31,36,48,.92); color: #fff; padding: 9px 18px; border-radius: 8px;
@@ -90,6 +100,38 @@
       <div class="status-item"><div class="k">唤醒词</div><div id="st-keywords">-</div></div>
       <div class="status-item"><div class="k">传话记录</div><div id="st-count">-</div></div>
       <div class="status-item"><div class="k">服务器时间</div><div id="st-time">-</div></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>入站对接（孩子语音 → 传话筒）</h2>
+    <div class="hint" style="margin:0 0 10px">
+      孩子的语音由 MIoT 插件轮询，需要把本插件登记为它的「对话 Webhook」。选择对接方式：
+    </div>
+    <div class="seg" id="inbound-seg">
+      <button type="button" data-mode="auto">自动注册（推荐）</button>
+      <button type="button" data-mode="manual">手动填写</button>
+    </div>
+
+    <div class="url-row">
+      <input type="text" id="inbound-url" readonly placeholder="保存配置并连接后自动生成">
+      <button type="button" class="btn" id="copy-url">复制地址</button>
+    </div>
+
+    <!-- 自动 -->
+    <div class="mode-pane" id="pane-auto">
+      <div class="step">插件将<b>自动调用 MIoT 接口</b>完成注册，无需你去音箱插件里操作。</div>
+      <div class="actions" style="margin-top:8px">
+        <button type="button" class="btn primary" id="register-now">立即注册</button>
+        <span id="register-status" style="font-size:13px"></span>
+      </div>
+    </div>
+
+    <!-- 手动 -->
+    <div class="mode-pane" id="pane-manual">
+      <div class="step">① 打开 <b>智能音箱插件 → 语音 → Webhook 回调</b></div>
+      <div class="step">② 名称随意（如「传话筒」），URL 粘贴<b>上面复制的地址</b>，点「添加」</div>
+      <div class="hint">手动添加后可点「立即注册」旁的状态检查，或直接看页面状态是否变为已注册。</div>
     </div>
   </section>
 

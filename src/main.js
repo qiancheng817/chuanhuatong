@@ -52,6 +52,8 @@
       confirmText: "已转告小爱音箱",
       // MIoT 插件 entryPath
       miotEntry: "miot",
+      // 入站对接方式：auto = 插件自动向 MIoT 注册对话 webhook；manual = 用户手动填写
+      inboundMode: "auto",
       // 目标音箱（留空则使用最近一次 webhook 上报的设备）
       targetAccountId: "",
       targetDeviceId: ""
@@ -62,7 +64,8 @@
     botId: "string", botSecret: "string", groupWebhookUrl: "string",
     wakeKeywords: "array", stripKeyword: "bool",
     senderName: "string", replyPrefix: "string", confirmText: "string",
-    miotEntry: "string", targetAccountId: "string", targetDeviceId: "string"
+    miotEntry: "string", inboundMode: "string",
+    targetAccountId: "string", targetDeviceId: "string"
   };
 
   function normalizeConfig(incoming) {
@@ -84,6 +87,7 @@
       }
     });
     if (!c.miotEntry) c.miotEntry = "miot";
+    if (c.inboundMode !== "auto" && c.inboundMode !== "manual") c.inboundMode = "auto";
     if (!c.wakeKeywords.length) c.wakeKeywords = defaultConfig().wakeKeywords;
     return c;
   }
@@ -93,6 +97,15 @@
   var msgSeq = 0;
   var lastDevice = { account_id: "", device_id: "", device_name: "" };
   var lastChatid = "";
+
+  // 入站 webhook 对接状态（最近一次检查/注册结果）
+  var inboundState = {
+    url: "",
+    registered: false,   // MIoT 中是否已注册指向本插件的 webhook
+    checking: false,
+    detail: "",          // 失败原因
+    lastChecked: 0
+  };
 
   // ----------------------------------------------------------------
   // 工具
@@ -262,30 +275,138 @@
     return { account_id: accountId, device_id: deviceId };
   }
 
+  // 宿主地址 + 插件 JWT
+  async function getHostContext() {
+    var host = trimSlash(await songloft.plugin.getHostUrl());
+    var jwt = await songloft.plugin.getToken();
+    return { host: host, jwt: jwt };
+  }
+
+  function miotApiBase(ctx) {
+    return ctx.host + "/api/v1/jsplugin/" + encodeURIComponent(config.miotEntry);
+  }
+
+  // 本插件接收对话 webhook 的地址（MIoT 服务器内部自访问）
+  function buildInboundUrl(ctx) {
+    return ctx.host + "/api/v1/jsplugin/chuanhuatong/relay/inbound";
+  }
+
   async function callMiotTTS(speakText) {
     var t = await resolveTarget();
     if (!t.account_id || !t.device_id) {
       return { ok: false, error: "目标音箱未知：请让孩子先说一次（自动记住设备），或在配置中手动指定" };
     }
-    var host = "";
-    var jwt = "";
+    var ctx;
     try {
-      host = trimSlash(await songloft.plugin.getHostUrl());
-      jwt = await songloft.plugin.getToken();
+      ctx = await getHostContext();
     } catch (e) {
       return { ok: false, error: "获取宿主地址/JWT 失败：" + e };
     }
-    var url = host + "/api/v1/jsplugin/" + encodeURIComponent(config.miotEntry) + "/mina/tts";
+    var url = miotApiBase(ctx) + "/mina/tts";
     var r = await httpRequest("POST", url, {
       account_id: t.account_id,
       device_id: t.device_id,
       text: speakText
-    }, { Authorization: "Bearer " + jwt });
+    }, { Authorization: "Bearer " + ctx.jwt });
 
     if (!r.ok) return { ok: false, error: r.error || ("HTTP " + r.status + " " + r.text) };
     if (r.data && r.data.success === false) {
       return { ok: false, error: r.data.error || "MIoT TTS 调用失败" };
     }
+    return { ok: true };
+  }
+
+  // ----------------------------------------------------------------
+  // 入站 webhook 自动注册（本插件 → MIoT 对话 webhook）
+  // ----------------------------------------------------------------
+  // 查询 MIoT 中现有对话 webhook，判断 inbound URL 是否已注册
+  async function queryInboundRegistered(ctx) {
+    var url = miotApiBase(ctx) + "/conversation/webhooks";
+    var r = await httpRequest("GET", url, null, { Authorization: "Bearer " + ctx.jwt });
+    if (!r.ok) return { ok: false, error: "无法连接 MIoT（" + (r.error || ("HTTP " + r.status)) +
+      "），请确认 MIoT 插件已安装且 entryPath 为 " + config.miotEntry };
+    if (r.data && r.data.success === false) {
+      return { ok: false, error: r.data.error || "MIoT 返回错误" };
+    }
+    var list = (r.data && Array.isArray(r.data.data)) ? r.data.data : [];
+    var inboundUrl = buildInboundUrl(ctx);
+    var found = false;
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] && list[i].url === inboundUrl) { found = true; break; }
+    }
+    return { ok: true, registered: found, webhooks: list, url: inboundUrl };
+  }
+
+  // 检查（只读）并刷新 inboundState
+  async function checkInbound() {
+    if (inboundState.checking) return inboundState;
+    inboundState.checking = true;
+    try {
+      var ctx;
+      try {
+        ctx = await getHostContext();
+      } catch (e) {
+        inboundState.registered = false;
+        inboundState.detail = "获取宿主地址/JWT 失败：" + e;
+        inboundState.lastChecked = nowMs();
+        return inboundState;
+      }
+      var q = await queryInboundRegistered(ctx);
+      inboundState.url = q.url || buildInboundUrl(ctx);
+      inboundState.lastChecked = nowMs();
+      if (!q.ok) {
+        inboundState.registered = false;
+        inboundState.detail = q.error;
+      } else {
+        inboundState.registered = q.registered;
+        inboundState.detail = "";
+      }
+    } finally {
+      inboundState.checking = false;
+    }
+    return inboundState;
+  }
+
+  // 自动注册：已注册则跳过，否则 POST 给 MIoT（幂等）
+  async function registerInbound() {
+    var ctx;
+    try {
+      ctx = await getHostContext();
+    } catch (e) {
+      return { ok: false, error: "获取宿主地址/JWT 失败：" + e };
+    }
+
+    var inboundUrl = buildInboundUrl(ctx);
+    inboundState.url = inboundUrl;
+
+    var q = await queryInboundRegistered(ctx);
+    if (!q.ok) return { ok: false, error: q.error };
+    if (q.registered) {
+      inboundState.registered = true;
+      inboundState.detail = "";
+      inboundState.lastChecked = nowMs();
+      return { ok: true, already: true };
+    }
+
+    var r = await httpRequest(
+      "POST", miotApiBase(ctx) + "/conversation/webhooks",
+      { url: inboundUrl, name: "传话筒" },
+      { Authorization: "Bearer " + ctx.jwt }
+    );
+    inboundState.lastChecked = nowMs();
+    if (!r.ok) {
+      inboundState.registered = false;
+      inboundState.detail = r.error || ("HTTP " + r.status + " " + r.text);
+      return { ok: false, error: inboundState.detail };
+    }
+    if (r.data && r.data.success === false) {
+      inboundState.registered = false;
+      inboundState.detail = r.data.error || "MIoT 注册失败";
+      return { ok: false, error: inboundState.detail };
+    }
+    inboundState.registered = true;
+    inboundState.detail = "";
+    songloft.log.info("已自动向 MIoT 注册对话 webhook: " + inboundUrl);
     return { ok: true };
   }
 
@@ -564,6 +685,14 @@
         entry: config.miotEntry,
         lastDevice: lastDevice
       },
+      inbound: {
+        mode: config.inboundMode,
+        url: inboundState.url,
+        registered: inboundState.registered,
+        detail: inboundState.detail,
+        lastChecked: inboundState.lastChecked,
+        lastCheckedText: inboundState.lastChecked ? formatTime(inboundState.lastChecked) : ""
+      },
       wakeKeywords: config.wakeKeywords,
       messageCount: messages.length,
       serverTimeText: formatTime(nowMs())
@@ -583,8 +712,28 @@
       wecom.stop();
       setTimeout(function () { wecom.connect(); }, 500);
     }
-    songloft.log.info("config saved; ws=" + wecom.state);
+    songloft.log.info("config saved; ws=" + wecom.state + ", inbound=" + config.inboundMode);
+
+    // auto 模式：保存后自动向 MIoT 注册（延迟，避开重连/加载）
+    if (config.inboundMode === "auto") {
+      setTimeout(function () {
+        registerInbound().then(function (r) {
+          if (!r.ok) songloft.log.warn("自动注册 webhook 失败：" + r.error);
+        });
+      }, 1500);
+    }
     return jsonOk({ config: config });
+  }
+
+  async function handleInboundCheck() {
+    var s = await checkInbound();
+    return jsonOk({ inbound: s });
+  }
+
+  async function handleInboundRegister() {
+    var r = await registerInbound();
+    if (!r.ok) return jsonResponse({ ok: false, error: r.error }, 502);
+    return jsonOk({ already: !!r.already, inbound: inboundState });
   }
 
   async function handleTest(req) {
@@ -609,11 +758,28 @@
   // ----------------------------------------------------------------
   // 生命周期
   // ----------------------------------------------------------------
+  // auto 模式自动注册，带延迟重试（等 MIoT 加载/登录完成）
+  function autoRegisterWithRetry() {
+    var delays = [3000, 6000, 12000, 20000];
+    delays.forEach(function (d) {
+      setTimeout(function () {
+        if (config.inboundMode !== "auto") return;
+        registerInbound().then(function (r) {
+          if (!r.ok && d === delays[delays.length - 1]) {
+            songloft.log.warn("自动注册最终失败，可稍后在插件页手动点「立即注册」：" + r.error);
+          }
+        });
+      }, d);
+    });
+  }
+
   globalThis.onInit = async function () {
     await loadState();
     songloft.log.info("chuanhuatong initialized; lastDevice=" +
-      (lastDevice.device_name || "<none>") + ", ws=" + wecom.state);
+      (lastDevice.device_name || "<none>") + ", ws=" + wecom.state +
+      ", inbound=" + config.inboundMode);
     if (config.botId && config.botSecret) wecom.connect();
+    if (config.inboundMode === "auto") autoRegisterWithRetry();
   };
 
   globalThis.onDeinit = function () {
@@ -640,6 +806,8 @@
         return jsonOk({ messages: messages.slice(0, limit), total: messages.length });
       }
       if (method === "POST" && path === "/api/test") return await handleTest(req);
+      if (method === "GET" && path === "/api/inbound/status") return await handleInboundCheck();
+      if (method === "POST" && path === "/api/inbound/register") return await handleInboundRegister();
 
       return jsonFail("not found: " + method + " " + path, 404);
     } catch (e) {
