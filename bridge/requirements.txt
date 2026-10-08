@@ -1,0 +1,4 @@
+miservice>=3.0.1,<4
+aiohttp>=3.9
+websockets>=12
+wecom-aibot-sdk-python>=0.1.7

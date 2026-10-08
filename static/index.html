@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>传话筒</title>
+<style>
+  :root {
+    --bg: #f4f6fa;
+    --card: #ffffff;
+    --text: #1f2430;
+    --muted: #6b7280;
+    --primary: #3b6ef6;
+    --primary-text: #ffffff;
+    --border: #e5e8ef;
+    --ok: #16a34a;
+    --fail: #dc2626;
+    --pending: #d97706;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+      "Microsoft YaHei", sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+  header {
+    padding: 20px 20px 8px;
+    max-width: 860px;
+    margin: 0 auto;
+  }
+  header h1 { margin: 0; font-size: 22px; }
+  header .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  main { max-width: 860px; margin: 0 auto; padding: 8px 20px 40px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin: 14px 0;
+  }
+  .card h2 {
+    margin: 0 0 12px;
+    font-size: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  label.field { display: block; margin: 10px 0; }
+  label.field > span {
+    display: block;
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  input[type="text"], input[type="password"], select {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 14px;
+    color: var(--text);
+    background: #fff;
+    outline: none;
+  }
+  input:focus, select:focus { border-color: var(--primary); }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .row > label.field { flex: 1 1 220px; }
+  .check { display: flex; align-items: center; gap: 8px; margin: 10px 0; }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+  .btn {
+    border: 1px solid var(--border);
+    background: #fff;
+    color: var(--text);
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .btn:hover { border-color: var(--primary); }
+  .btn.primary { background: var(--primary); border-color: var(--primary); color: var(--primary-text); }
+  .btn.small { padding: 3px 10px; font-size: 12px; }
+  .status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 8px 16px;
+  }
+  .status-item .k { color: var(--muted); font-size: 12px; }
+  .badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+  }
+  .badge.on { background: rgba(22,163,74,.12); color: var(--ok); }
+  .badge.off { background: rgba(220,38,38,.10); color: var(--fail); }
+  .msg {
+    display: flex;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px dashed var(--border);
+  }
+  .msg:last-child { border-bottom: none; }
+  .msg .dir { font-size: 18px; line-height: 1.4; }
+  .msg .body { flex: 1; min-width: 0; }
+  .msg .meta { font-size: 12px; color: var(--muted); }
+  .msg .text { word-break: break-word; }
+  .st { font-size: 12px; margin-left: 6px; }
+  .st.delivered, .st.broadcast { color: var(--ok); }
+  .st.failed { color: var(--fail); }
+  .st.pending { color: var(--pending); }
+  .detail { font-size: 12px; color: var(--fail); margin-top: 2px; word-break: break-all; }
+  .empty { color: var(--muted); text-align: center; padding: 18px 0; }
+  #toast {
+    position: fixed;
+    left: 50%;
+    bottom: 28px;
+    transform: translateX(-50%);
+    background: rgba(31,36,48,.92);
+    color: #fff;
+    padding: 9px 18px;
+    border-radius: 8px;
+    font-size: 13px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .2s;
+    z-index: 99;
+  }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📞 传话筒</h1>
+  <div class="sub">小爱音箱 ↔ 企业微信 双向传话 · Songloft 插件</div>
+</header>
+<main>
+  <section class="card">
+    <h2>
+      运行状态
+      <button class="btn small" id="refresh-status">刷新</button>
+    </h2>
+    <div class="status-grid" id="status-grid">
+      <div class="status-item"><div class="k">桥接服务</div><div id="st-bridge">-</div></div>
+      <div class="status-item"><div class="k">企微模式</div><div id="st-mode">-</div></div>
+      <div class="status-item"><div class="k">群机器人 Webhook</div><div id="st-webhook">-</div></div>
+      <div class="status-item"><div class="k">唤醒词</div><div id="st-keywords">-</div></div>
+      <div class="status-item"><div class="k">传话记录</div><div id="st-count">-</div></div>
+      <div class="status-item"><div class="k">服务器时间</div><div id="st-time">-</div></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>插件配置</h2>
+    <form id="config-form">
+      <div class="row">
+        <label class="field">
+          <span>桥接服务地址（chuanhuatong-bridge，如 http://192.168.1.20:8788）</span>
+          <input type="text" id="cfg-bridgeUrl" placeholder="http://192.168.1.20:8788">
+        </label>
+        <label class="field">
+          <span>桥接共享密钥（BRIDGE_TOKEN，双方必须一致）</span>
+          <input type="password" id="cfg-bridgeToken" placeholder="自定义一串随机字符">
+        </label>
+      </div>
+      <div class="row">
+        <label class="field">
+          <span>企微出站方式</span>
+          <select id="cfg-wecomMode">
+            <option value="bridge-ws">桥接长连接（智能机器人，推荐）</option>
+            <option value="group-webhook">群机器人 Webhook（仅孩子→爸爸）</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>群机器人 Webhook 地址（选择群机器人模式时必填）</span>
+          <input type="text" id="cfg-groupWebhookUrl" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx">
+        </label>
+      </div>
+      <div class="row">
+        <label class="field">
+          <span>唤醒词（多个用逗号分隔）</span>
+          <input type="text" id="cfg-wakeKeywords" placeholder="告诉爸爸,呼叫爸爸">
+        </label>
+        <label class="field">
+          <span>发送方称呼</span>
+          <input type="text" id="cfg-senderName" placeholder="孩子">
+        </label>
+      </div>
+      <div class="row">
+        <label class="field">
+          <span>小爱播报前缀（爸爸回话时）</span>
+          <input type="text" id="cfg-replyPrefix" placeholder="爸爸说">
+        </label>
+        <label class="field">
+          <span>企微确认语（爸爸发消息后）</span>
+          <input type="text" id="cfg-confirmText" placeholder="已转告小爱音箱">
+        </label>
+      </div>
+      <div class="check">
+        <input type="checkbox" id="cfg-stripKeyword">
+        <label for="cfg-stripKeyword">推送到企微时剥离唤醒词（只保留传话内容）</label>
+      </div>
+      <div class="actions">
+        <button type="button" class="btn primary" id="save-btn">保存配置</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>连通性测试</h2>
+    <div class="actions">
+      <button type="button" class="btn" id="test-bridge">测试桥接服务</button>
+      <button type="button" class="btn" id="test-wecom">测试企微推送</button>
+      <button type="button" class="btn" id="test-tts">测试小爱播报</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>
+      传话记录
+      <button class="btn small" id="refresh-msgs">刷新</button>
+    </h2>
+    <div id="messages"><div class="empty">暂无传话记录</div></div>
+  </section>
+</main>
+<div id="toast"></div>
+<script src="static/js/app.js"></script>
+</body>
+</html>
