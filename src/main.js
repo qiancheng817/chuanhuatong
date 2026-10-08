@@ -20,7 +20,7 @@
   var MESSAGES_KEY = "messages";
   var DEVICE_KEY = "last_device";
   var MAX_MESSAGES = 200;
-  var PLUGIN_VERSION = "2.4.0";
+  var PLUGIN_VERSION = "2.5.0";
 
   var WECOM_WS_URL = "wss://openws.work.weixin.qq.com";
   var CMD_SUBSCRIBE = "aibot_subscribe";
@@ -274,6 +274,16 @@
   }
   function buildInboundUrl(ctx) {
     return ctx.host + "/api/v1/jsplugin/chuanhuatong/relay/inbound";
+  }
+  async function ensureInboundUrl() {
+    if (inboundState.url) return inboundState.url;
+    try {
+      var ctx = await getHostContext();
+      inboundState.url = buildInboundUrl(ctx);
+    } catch (e) {
+      songloft.log.warn("ensureInboundUrl failed: " + e);
+    }
+    return inboundState.url;
   }
 
   async function callMiotTTS(speakText) {
@@ -604,7 +614,8 @@
   // ----------------------------------------------------------------
   // 配置 / 查询 API（JWT 保护）
   // ----------------------------------------------------------------
-  function handleStatus() {
+  async function handleStatus() {
+    await ensureInboundUrl();
     return jsonOk({
       version: PLUGIN_VERSION,
       wecom: {
@@ -641,9 +652,14 @@
     return jsonOk({ config: config });
   }
 
+  async function handleInboundStatus() {
+    await ensureInboundUrl();
+    return jsonOk({ inbound: inboundState });
+  }
+
   async function handleInboundRegister() {
     var r = await registerInbound();
-    if (!r.ok) return jsonResponse({ ok: false, error: r.error }, 502);
+    if (!r.ok) return jsonResponse({ ok: false, error: r.error }, 200);
     return jsonOk({ already: !!r.already, inbound: inboundState });
   }
 
@@ -654,12 +670,12 @@
 
     if (body.target === "wecom-push") {
       var r = await pushToWecom(text);
-      if (!r.ok) return jsonResponse({ ok: false, error: r.error }, 502);
+      if (!r.ok) return jsonResponse({ ok: false, error: r.error }, 200);
       return jsonOk({ via: r.via });
     }
     if (body.target === "tts") {
       var t = await callMiotTTS(text);
-      if (!t.ok) return jsonResponse({ ok: false, error: t.error }, 502);
+      if (!t.ok) return jsonResponse({ ok: false, error: t.error }, 200);
       return jsonOk({ result: "tts ok" });
     }
     return jsonFail("unknown target（wecom-push / tts）", 400);
@@ -702,6 +718,7 @@
         return jsonOk({ messages: messages.slice(0, q.limit), total: messages.length });
       }
       if (method === "POST" && path === "/api/test") return await handleTest(req);
+      if (method === "GET" && path === "/api/inbound/status") return await handleInboundStatus();
       if (method === "POST" && path === "/api/inbound/register") return await handleInboundRegister();
 
       return jsonFail("not found: " + method + " " + path, 404);

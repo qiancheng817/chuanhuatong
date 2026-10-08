@@ -106,6 +106,7 @@
         ? badge("on", "已配置") : badge("off", "未配置");
       document.getElementById("st-webhook").innerHTML = s.wecom.groupWebhookConfigured
         ? badge("on", "已配置") : badge("off", "未配置");
+      document.getElementById("st-chatid").textContent = s.wecom.chatid || "未设置";
 
       var dev = s.device || {};
       document.getElementById("st-device").textContent = dev.device_name || "未知";
@@ -113,6 +114,8 @@
       document.getElementById("st-keywords").textContent = (s.wakeKeywords || []).join(" / ");
       document.getElementById("st-count").textContent = s.messageCount + " 条";
       document.getElementById("st-time").textContent = s.serverTimeText || "-";
+
+      if (s.inbound) renderInbound(s.inbound);
     } catch (e) {}
   }
 
@@ -155,18 +158,32 @@
         toast("注册失败：" + (r && r.error || "未知错误"), 3500);
       }
     } catch (e) {
+      el.innerHTML = badge("off", "失败") +
+        ' <span style="color:var(--fail)">' + escapeHtml("" + e) + "</span>";
       toast("注册失败：" + e, 3500);
     }
   }
 
-  function copyInboundUrl() {
+  async function copyInboundUrl() {
     var input = document.getElementById("inbound-url");
-    if (!input.value) { toast("地址还未生成，请先保存配置"); return; }
-    input.select();
+    var url = input.value;
+    if (!url) { toast("地址还未生成，请稍候再试"); return; }
     var done = false;
-    try { done = document.execCommand("copy"); } catch (e) {}
-    if (navigator.clipboard) { navigator.clipboard.writeText(input.value); done = true; }
-    toast(done ? "地址已复制" : "复制失败，请手动选择");
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(url);
+        done = true;
+      }
+    } catch (e) {}
+    if (!done) {
+      try {
+        input.focus();
+        input.select();
+        input.setSelectionRange(0, url.length);
+        done = document.execCommand("copy");
+      } catch (e) {}
+    }
+    toast(done ? "地址已复制" : "复制失败，请手动复制", done ? 2200 : 4000);
   }
 
   // --------------------------------------------------------------
