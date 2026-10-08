@@ -149,13 +149,24 @@
     </div>
     <div class="row">
       <label class="field">
-        <span>群机器人 Webhook（孩子→爸爸推送，推荐填写）</span>
+        <span>群机器人 Webhook（孩子→大人推送，推荐填写）</span>
         <input type="text" id="cfg-groupWebhookUrl" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx">
       </label>
     </div>
+    <div class="row">
+      <label class="field">
+        <span>手动会话 chatid（留空 = 自动捕获；机器人推送不通时填此项）</span>
+        <input type="text" id="cfg-manualChatid" placeholder="如 ZhangSan 或 群聊 chatid">
+      </label>
+      <div class="field" style="flex:1 1 220px">
+        <span>当前生效 chatid / 来源</span>
+        <div id="chatid-info" style="font-size:13px;padding:8px 0">—</div>
+      </div>
+    </div>
     <div class="hint">
-      孩子→爸爸：填了群机器人 Webhook 即走它推送（最可靠）；留空则尝试用智能机器人长连接推送（需你先在机器人里说过话）。<br>
-      爸爸→孩子：必须配置智能机器人 Bot ID / Secret，本插件通过长连接接收你的打字。
+      孩子→大人：填了群机器人 Webhook 即走它推送（最可靠，无需 chatid）；留空则走智能机器人长连接，需要会话 chatid。<br>
+      chatid 获取：正常情况下你<b>先在机器人单聊里发一句话</b>，插件自动捕获；自动捕获失败（如单聊无 chatid）可在上方手动填写——单聊填你的企微 userid，群聊填该群 chatid。<br>
+      大人→孩子：必须配置智能机器人 Bot ID / Secret，本插件通过长连接接收你的打字。
     </div>
   </section>
 

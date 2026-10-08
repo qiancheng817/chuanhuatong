@@ -40,6 +40,8 @@
       botSecret: "",
       // 企微群机器人 webhook（孩子→爸爸推送，最简单可靠）；留空则走智能机器人长连接
       groupWebhookUrl: "",
+      // 手动指定智能机器人会话 chatid（自动捕获失败时兜底）；留空 = 自动捕获
+      manualChatid: "",
       // 唤醒词：孩子语音必须以其中一个开头（三种称呼，含常见口语变体）
       wakeKeywords: [
         "告诉爸爸和妈妈", "告诉爸爸妈妈", "告诉爸妈",
@@ -61,7 +63,7 @@
   }
 
   var FIELD_TYPES = {
-    botId: "string", botSecret: "string", groupWebhookUrl: "string",
+    botId: "string", botSecret: "string", groupWebhookUrl: "string", manualChatid: "string",
     wakeKeywords: "array", stripKeyword: "bool",
     senderName: "string", replyPrefix: "string", confirmText: "string",
     miotEntry: "string", inboundMode: "string",
@@ -245,6 +247,11 @@
   // ----------------------------------------------------------------
   // 企微推送（孩子 → 爸爸）
   // ----------------------------------------------------------------
+  // 生效的会话 chatid：手动配置优先，其次自动捕获
+  function getEffectiveChatid() {
+    return (config.manualChatid || lastChatid || "").trim();
+  }
+
   async function pushToWecom(content) {
     // 优先：群机器人 webhook（无需会话、最可靠）
     if (config.groupWebhookUrl) {
@@ -258,12 +265,13 @@
       if (!r.ok) return { ok: false, error: r.error || ("HTTP " + r.status) };
       return { ok: true, via: "group-webhook" };
     }
-    // 回退：智能机器人长连接主动推送（需要爸爸的 chatid）
-    if (wecom.state === "open" && lastChatid) {
-      var sent = wecom.send(lastChatid, content);
+    // 回退：智能机器人长连接主动推送（需要会话 chatid）
+    var chatid = getEffectiveChatid();
+    if (wecom.state === "open" && chatid) {
+      var sent = wecom.send(chatid, content);
       return sent ? { ok: true, via: "aibot-ws" } : { ok: false, error: "智能机器人发送失败" };
     }
-    return { ok: false, error: "未配置群机器人 webhook，且智能机器人长连接/会话不可用" };
+    return { ok: false, error: "智能机器人推送失败：未配置群机器人 webhook，且无可用会话 chatid（可在配置页手动填写，或先在机器人里发一句话）" };
   }
 
   // ----------------------------------------------------------------
@@ -569,8 +577,9 @@
       if (body.msgtype === "text") {
         var content = (body.text && body.text.content || "").trim();
         var reqId = frame.headers && frame.headers.req_id;
-        var chatid = body.chatid || "";
-        if (chatid) { lastChatid = "" + chatid; saveChatid(); }
+        // 群聊取 chatid；单聊常无 chatid，回退发送方 userid
+        var captured = body.chatid || body.from_userid || "";
+        if (captured) { lastChatid = "" + captured; saveChatid(); }
         if (content) this.handleIncomingText(content, reqId);
       }
     },
@@ -679,7 +688,10 @@
         wsState: wecom.state,
         botConfigured: !!(config.botId && config.botSecret),
         groupWebhookConfigured: !!config.groupWebhookUrl,
-        chatid: lastChatid
+        manualChatid: config.manualChatid,
+        autoChatid: lastChatid,
+        chatid: getEffectiveChatid(),
+        chatidSource: config.manualChatid ? "manual" : (lastChatid ? "auto" : "")
       },
       miot: {
         entry: config.miotEntry,

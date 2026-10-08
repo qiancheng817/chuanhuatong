@@ -37,6 +37,7 @@
     document.getElementById("cfg-botId").value = c.botId || "";
     document.getElementById("cfg-botSecret").value = c.botSecret || "";
     document.getElementById("cfg-groupWebhookUrl").value = c.groupWebhookUrl || "";
+    document.getElementById("cfg-manualChatid").value = c.manualChatid || "";
     document.getElementById("cfg-wakeKeywords").value = (c.wakeKeywords || []).join(",");
     document.getElementById("cfg-senderName").value = c.senderName || "";
     document.getElementById("cfg-replyPrefix").value = c.replyPrefix || "";
@@ -65,6 +66,7 @@
       botId: document.getElementById("cfg-botId").value.trim(),
       botSecret: document.getElementById("cfg-botSecret").value,
       groupWebhookUrl: document.getElementById("cfg-groupWebhookUrl").value.trim(),
+      manualChatid: document.getElementById("cfg-manualChatid").value.trim(),
       wakeKeywords: document.getElementById("cfg-wakeKeywords").value,
       senderName: document.getElementById("cfg-senderName").value.trim() || "孩子",
       replyPrefix: document.getElementById("cfg-replyPrefix").value.trim(),
@@ -118,6 +120,14 @@
         ? badge("on", "已配置") : badge("off", "未配置");
       document.getElementById("st-webhook").innerHTML = s.wecom.groupWebhookConfigured
         ? badge("on", "已配置") : badge("off", "未配置");
+
+      var info = document.getElementById("chatid-info");
+      if (s.wecom.chatid) {
+        var src = { manual: "手动", auto: "自动捕获", "": "" }[s.wecom.chatidSource] || "";
+        info.innerHTML = escapeHtml(s.wecom.chatid) + ' <span class="badge info">' + src + "</span>";
+      } else {
+        info.innerHTML = '<span style="color:var(--muted)">无（请先在机器人里发一句话，或手动填写）</span>';
+      }
 
       var dev = s.miot.lastDevice || {};
       document.getElementById("st-device").textContent = dev.device_name || "未知";
