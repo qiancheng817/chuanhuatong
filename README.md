@@ -76,7 +76,7 @@ https://cdn.jsdelivr.net/gh/qiancheng817/chuanhuatong@main/registry.json
 5. 配置机器人**可见范围**（包含你自己），保存
 6. 打开机器人单聊，先发一句话（如「你好」）激活会话
 
-### 第二步：（推荐）创建企微群机器人（用于接收孩子传话）
+### 第二步：多人用，创建企微群机器人（用于接收孩子传话），若单人用，忽略这一步
 
 在任意企微群 → 右上角 `…` → 消息推送（群机器人）→ 添加，复制 **Webhook 地址**：
 
@@ -84,7 +84,7 @@ https://cdn.jsdelivr.net/gh/qiancheng817/chuanhuatong@main/registry.json
 https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxxxxxx
 ```
 
-> 群机器人推送最可靠（不依赖会话状态）。若你只在智能机器人单聊里收发，也可不建群机器人——此时孩子→爸爸会走智能机器人长连接推送（前提是你先在机器人里说过话）。
+> 群机器人推送最可靠（不依赖会话状态）。若你只在智能机器人单聊里收发，也可不建群机器人——此时孩子→爸爸会走智能机器人长连接推送。
 
 ### 第三步：安装并配置传话筒插件
 
